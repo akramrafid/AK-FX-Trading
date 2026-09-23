@@ -164,3 +164,9 @@
 **Changed:** bridge/executor.py
 **Verified:** Command `python -c "import bridge.executor"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:34 — P3-T004: MQL4 Expert Advisor Specification & Script
+**Owner:** senior-integration-engineer
+**Changed:** bridge/mql4/DWX_AutoTrader.mq4
+**Verified:** Command `python -c "open('bridge/mql4/DWX_AutoTrader.mq4').read()"` passed (exit code 0).
+**Status:** COMPLETED

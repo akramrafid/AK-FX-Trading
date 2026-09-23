@@ -197,7 +197,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Closed-bar event loop triggering orders on confirmed 3-candle breakouts.
   - **Verify:** python -c "import bridge.executor"
 
-- [ ] **P3-T004** MQL4 Expert Advisor Specification & Script
+- [x] **P3-T004** MQL4 Expert Advisor Specification & Script
   - **Owner:** senior-integration-engineer
   - **Deps:** P3-T001
   - **Files:** bridge/mql4/DWX_AutoTrader.mq4
