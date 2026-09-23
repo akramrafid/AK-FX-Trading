@@ -205,10 +205,10 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Valid MQL4 source script ready for MT4 MetaEditor compilation.
   - **Verify:** python -c "open('bridge/mql4/DWX_AutoTrader.mq4').read()"
 
-- [ ] **P3-T005** Bridge & Execution Simulation Test Suite
+- [x] **P3-T005** Bridge & Execution Simulation Test Suite
   - **Owner:** senior-qa-architect
   - **Deps:** P3-T003, P3-T004
-  - **Files:** tests/test_bridge.py
+  - **Files:** tests/test_bridge.py, bridge/dwx_client.py, bridge/executor.py, bridge/sizing.py
   - **Do:** Write end-to-end integration tests for DWX file protocol, mock MT4 bar generation, command writing, idempotency checking, and error recovery on locked/malformed files.
   - **Accept:** 100% green test suite validating live bridge pipeline.
   - **Verify:** python tests/test_bridge.py

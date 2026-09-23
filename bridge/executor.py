@@ -33,7 +33,7 @@ def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
     Formula: (Month*10000000 + Day*100000 + Hour*1000 + Minute*10 + sequence) % 2000000000
     Example: Sept 24, 03:25 -> 09*10000000 + 24*100000 + 03*1000 + 25*10 + 1 = 92,403,251 (< 2.14B).
     """
-    base = (dt.month * 10_000_000) + (dt.day * 100_000) + (dt.hour * 1,000) + (dt.minute * 10) + (sequence % 10)
+    base = (dt.month * 10_000_000) + (dt.day * 100_000) + (dt.hour * 1000) + (dt.minute * 10) + (sequence % 10)
     return int(base % 2_000_000_000)
 
 
@@ -85,7 +85,7 @@ class BridgeExecutor:
         self.exchange_rates = exchange_rates or {}
 
         # Core Rule Engine (strictly shared between backtester & live bridge)
-        self.rule_engine = rule_engine or RuleEngine(min_candles_history=20)
+        self.rule_engine = rule_engine or RuleEngine(swing_lookback=20)
         self.position_sizer = position_sizer or PositionSizer(default_risk_pct=risk_pct)
 
         # Callbacks
@@ -93,6 +93,7 @@ class BridgeExecutor:
         self.on_order_callback = on_order_callback
 
         # State tracking
+        self.candle_history: List[Candle] = []
         self.last_processed_bar_time: Optional[datetime] = None
         self.processed_signal_keys: Set[str] = set()
         self.order_records: List[BridgeOrderRecord] = []
@@ -113,34 +114,42 @@ class BridgeExecutor:
         if not closed_bars:
             return None
 
-        # Filter bars newer than last processed
-        new_bars: List[Candle] = []
-        if self.last_processed_bar_time is None:
-            # First run: seed history with earlier bars, process last bar
-            new_bars = closed_bars
-        else:
-            new_bars = [c for c in closed_bars if c.timestamp > self.last_processed_bar_time]
+        dispatched_record: Optional[BridgeOrderRecord] = None
 
+        if self.last_processed_bar_time is None:
+            # First initialization: store history and evaluate latest closed bar
+            self.candle_history = list(closed_bars)
+            self.last_processed_bar_time = closed_bars[-1].timestamp
+            if len(self.candle_history) >= 5:
+                signal = self.rule_engine.evaluate_completed_candle(self.candle_history)
+                if signal is not None:
+                    dispatched_record = self._execute_signal(signal)
+            return dispatched_record
+
+        # Find new bars that closed after last processed timestamp
+        new_bars = [c for c in closed_bars if c.timestamp > self.last_processed_bar_time]
         if not new_bars:
             return None
 
-        dispatched_record: Optional[BridgeOrderRecord] = None
-
         for bar in new_bars:
             self.last_processed_bar_time = bar.timestamp
-            signal = self.rule_engine.process_bar(bar)
-
-            if signal is not None:
-                record = self._execute_signal(signal)
-                if record is not None:
-                    dispatched_record = record
+            self.candle_history.append(bar)
+            if len(self.candle_history) >= 5:
+                signal = self.rule_engine.evaluate_completed_candle(self.candle_history)
+                if signal is not None:
+                    record = self._execute_signal(signal)
+                    if record is not None:
+                        dispatched_record = record
 
         return dispatched_record
 
     def _execute_signal(self, signal: TradeSignal) -> Optional[BridgeOrderRecord]:
         """Validates signal, computes dynamic position size, and dispatches to MT4."""
+        signal_dir = Direction.BUY if str(signal.direction).upper() == "BUY" else Direction.SELL
+        signal_time = signal.timestamp or datetime.now(timezone.utc)
+
         # Signal idempotency key
-        signal_key = f"{self.symbol}_{signal.direction.value}_{signal.candle_3.timestamp.isoformat()}"
+        signal_key = f"{self.symbol}_{signal_dir.value}_{signal_time.isoformat()}"
         if signal_key in self.processed_signal_keys:
             logger.warning(f"Duplicate signal detected for key {signal_key}; skipping execution.")
             return None
@@ -148,6 +157,11 @@ class BridgeExecutor:
 
         if self.on_signal_callback:
             self.on_signal_callback(signal)
+
+        # Convert price values to Decimal for precision financial tracking
+        entry_dec = Decimal(str(round(signal.entry_price, 5)))
+        sl_dec = Decimal(str(round(signal.stop_loss, 5)))
+        tp_dec = Decimal(str(round(signal.take_profit, 5)))
 
         # Dynamic lot sizing
         stop_pips = self.position_sizer.price_diff_to_pips(self.symbol, signal.risk_distance)
@@ -157,7 +171,7 @@ class BridgeExecutor:
             symbol=self.symbol,
             risk_pct=self.risk_pct,
             rates=self.exchange_rates,
-            current_price=signal.entry_price,
+            current_price=entry_dec,
         )
 
         if not sizing.is_valid:
@@ -166,11 +180,11 @@ class BridgeExecutor:
                 magic=0,
                 signal_id=signal_key,
                 symbol=self.symbol,
-                direction=signal.direction,
+                direction=signal_dir,
                 lots=Decimal("0.00"),
-                entry_price=signal.entry_price,
-                sl_price=signal.sl_price,
-                tp_price=signal.tp_price,
+                entry_price=entry_dec,
+                sl_price=sl_dec,
+                tp_price=tp_dec,
                 risk_pips=stop_pips,
                 reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
                 dispatched_at=datetime.now(timezone.utc),
@@ -184,19 +198,19 @@ class BridgeExecutor:
 
         # Generate MT4 magic number
         self._magic_seq += 1
-        magic = generate_mt4_magic_number(signal.candle_3.timestamp, self._magic_seq)
+        magic = generate_mt4_magic_number(signal_time, self._magic_seq)
 
-        order_type = OrderType.BUY if signal.direction == Direction.BUY else OrderType.SELL
+        order_type = OrderType.BUY if signal_dir == Direction.BUY else OrderType.SELL
 
         record = BridgeOrderRecord(
             magic=magic,
             signal_id=signal_key,
             symbol=self.symbol,
-            direction=signal.direction,
+            direction=signal_dir,
             lots=sizing.lots,
-            entry_price=signal.entry_price,
-            sl_price=signal.sl_price,
-            tp_price=signal.tp_price,
+            entry_price=entry_dec,
+            sl_price=sl_dec,
+            tp_price=tp_dec,
             risk_pips=stop_pips,
             reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
             dispatched_at=datetime.now(timezone.utc),
@@ -210,8 +224,8 @@ class BridgeExecutor:
                 symbol=self.symbol,
                 order_type=order_type,
                 lots=sizing.lots,
-                sl=signal.sl_price,
-                tp=signal.tp_price,
+                sl=sl_dec,
+                tp=tp_dec,
                 magic=magic,
                 comment="akstack_10R",
             )

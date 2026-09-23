@@ -412,11 +412,11 @@ class DWXClient:
 
                 c = Candle(
                     timestamp=dt,
-                    open=Decimal(parts[1]),
-                    high=Decimal(parts[2]),
-                    low=Decimal(parts[3]),
-                    close=Decimal(parts[4]),
-                    volume=Decimal(parts[5]) if len(parts) > 5 else Decimal("0"),
+                    open=float(parts[1]),
+                    high=float(parts[2]),
+                    low=float(parts[3]),
+                    close=float(parts[4]),
+                    volume=float(parts[5]) if len(parts) > 5 else 0.0,
                 )
                 candles.append(c)
             except Exception as e:

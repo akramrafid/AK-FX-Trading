@@ -59,10 +59,11 @@ class PositionSizer:
         return Decimal("0.0001")
 
     @classmethod
-    def price_diff_to_pips(cls, symbol: str, price_diff: Decimal) -> Decimal:
+    def price_diff_to_pips(cls, symbol: str, price_diff: Decimal | float) -> Decimal:
         """Converts absolute price difference into pip count."""
         pip_size = cls.get_pip_size(symbol)
-        return (abs(price_diff) / pip_size).quantize(Decimal("0.1"))
+        dec_diff = Decimal(str(abs(price_diff)))
+        return (dec_diff / pip_size).quantize(Decimal("0.1"))
 
     def get_pip_value_usd(
         self,
