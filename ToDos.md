@@ -129,7 +129,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Loads and normalizes historical CSV into sorted, validated Candle sequence.
   - **Verify:** python -c "import data.loader"
 
-- [ ] **P2-T002** Event-Driven Backtest Simulator
+- [x] **P2-T002** Event-Driven Backtest Simulator
   - **Owner:** senior-backend-engineer
   - **Deps:** P2-T001
   - **Files:** engine/backtester.py
