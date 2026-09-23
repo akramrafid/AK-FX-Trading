@@ -190,3 +190,9 @@
 **Changed:** risk/models.py, risk/__init__.py
 **Verified:** Command `python -c "import risk.models"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:42 — P4-T002: Non-Bypassable Risk Guardrails Engine
+**Owner:** senior-backend-engineer
+**Changed:** risk/guardrails.py, risk/__init__.py
+**Verified:** Command `python -c "import risk.guardrails"` passed (exit code 0).
+**Status:** COMPLETED

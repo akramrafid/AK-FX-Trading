@@ -233,10 +233,10 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Strongly typed domain models for account balances, daily loss calculations, and trade constraints.
   - **Verify:** python -c "import risk.models"
 
-- [ ] **P4-T002** Non-Bypassable Risk Guardrails Engine
+- [x] **P4-T002** Non-Bypassable Risk Guardrails Engine
   - **Owner:** senior-backend-engineer
   - **Deps:** P4-T001
-  - **Files:** risk/guardrails.py
+  - **Files:** risk/guardrails.py, risk/__init__.py
   - **Do:** Implement standalone RiskGuardrails with non-bypassable validate_trade() evaluating daily loss limits (3.0%), max open trades (default 1), max daily trades (default 3), spread ceiling (default 2.5 pips), and session time filter (London/NY 07:00-17:00 UTC).
   - **Accept:** Every trade passed through mandatory validation; zero bypass allowed.
   - **Verify:** python -c "import risk.guardrails"
