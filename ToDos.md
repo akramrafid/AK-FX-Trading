@@ -161,7 +161,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** 100% green test suite validating backtesting mechanics and metrics computation.
   - **Verify:** python tests/test_backtester.py
 
-- [ ] **P2-G1** Phase 2 Architecture & Backtest Verification Gate
+- [x] **P2-G1** Phase 2 Architecture & Backtest Verification Gate
   - **Owner:** coordinator
   - **Deps:** P2-T005
   - **Files:** docs/qa/phase2-report.md
