@@ -93,7 +93,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Exact confirmation evaluation and mathematical 10:1 R:R calculation.
   - **Verify:** python -c "import engine.confirmation"
 
-- [ ] **P1-T004** ★ Consolidated Core Rule Engine
+- [x] **P1-T004** ★ Consolidated Core Rule Engine
   - **Owner:** senior-system-architect
   - **Deps:** P1-T001, P1-T002, P1-T003
   - **Files:** engine/rule_engine.py
