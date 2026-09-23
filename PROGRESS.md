@@ -184,3 +184,9 @@
 **Verification:** Command `python tests/test_bridge.py` passed (exit code 0).
 **Notes:** None
 **Status:** PASSED
+
+### 2026-09-24 03:41 — P4-T001: Risk State & Invariant Models
+**Owner:** senior-backend-engineer
+**Changed:** risk/models.py, risk/__init__.py
+**Verified:** Command `python -c "import risk.models"` passed (exit code 0).
+**Status:** COMPLETED

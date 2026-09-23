@@ -225,7 +225,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ## Phase 4 — Non-Bypassable Risk Guardrails & Circuit Breakers
 
-- [ ] **P4-T001** Risk State & Invariant Models
+- [x] **P4-T001** Risk State & Invariant Models
   - **Owner:** senior-backend-engineer
   - **Deps:** P3-G1
   - **Files:** risk/models.py, risk/__init__.py
