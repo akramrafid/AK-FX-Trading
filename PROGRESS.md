@@ -152,3 +152,9 @@
 **Changed:** bridge/dwx_client.py, bridge/__init__.py
 **Verified:** Command `python -c "import bridge.dwx_client"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:32 — P3-T002: Dynamic Position Sizing & Currency Pip Value Engine
+**Owner:** senior-backend-engineer
+**Changed:** bridge/sizing.py
+**Verified:** Command `python -c "import bridge.sizing"` passed (exit code 0).
+**Status:** COMPLETED

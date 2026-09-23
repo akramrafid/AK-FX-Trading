@@ -181,7 +181,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Clean read/write file protocol with atomic file locking and error handling.
   - **Verify:** python -c "import bridge.dwx_client"
 
-- [ ] **P3-T002** Dynamic Position Sizing & Currency Pip Value Engine
+- [x] **P3-T002** Dynamic Position Sizing & Currency Pip Value Engine
   - **Owner:** senior-backend-engineer
   - **Deps:** P3-T001
   - **Files:** bridge/sizing.py
