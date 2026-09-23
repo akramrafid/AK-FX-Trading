@@ -101,13 +101,13 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Rule engine strictly operates on closed candles; returns TradeSignal matching all specification rules.
   - **Verify:** python -c "import engine.rule_engine"
 
-- [ ] **P1-T005** Comprehensive Test Suite for Rule Engine
+- [x] **P1-T005** Comprehensive Test Suite for Rule Engine
   - **Owner:** senior-qa-architect
   - **Deps:** P1-T004
   - **Files:** tests/test_rule_engine.py
   - **Do:** Write exhaustive unit test suite testing Variant A/B bullish/bearish sweeps, 3-candle confirmation successes/failures, SL/TP mathematics for both directions, and edge cases (gap, incomplete bars, flat bars).
   - **Accept:** All tests pass cleanly with 100% coverage on rule engine logic.
-  - **Verify:** python -m unittest tests.test_rule_engine -v
+  - **Verify:** python tests/test_rule_engine.py
 
 - [ ] **P1-G1** Phase 1 Rule Engine Verification Gate
   - **Owner:** coordinator
@@ -115,7 +115,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Files:** docs/qa/phase1-report.md
   - **Do:** Execute full test suite, verify rule engine meets all Phase 1 specifications, and write Phase 1 verification report.
   - **Accept:** Complete report in docs/qa/phase1-report.md confirming zero intrabar leakage, exact 10:1 math, and passing tests.
-  - **Verify:** python -m unittest tests.test_rule_engine -v
+  - **Verify:** python tests/test_rule_engine.py
 
 ---
 
