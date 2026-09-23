@@ -189,7 +189,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Exact lot size computation compliant with Hard Rule 3.
   - **Verify:** python -c "import bridge.sizing"
 
-- [ ] **P3-T003** MT4 Bar Poller & Signal Execution Bridge
+- [x] **P3-T003** MT4 Bar Poller & Signal Execution Bridge
   - **Owner:** senior-integration-engineer
   - **Deps:** P3-T001, P3-T002
   - **Files:** bridge/executor.py

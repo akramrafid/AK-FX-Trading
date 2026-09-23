@@ -158,3 +158,9 @@
 **Changed:** bridge/sizing.py
 **Verified:** Command `python -c "import bridge.sizing"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:33 — P3-T003: MT4 Bar Poller & Signal Execution Bridge
+**Owner:** senior-integration-engineer
+**Changed:** bridge/executor.py
+**Verified:** Command `python -c "import bridge.executor"` passed (exit code 0).
+**Status:** COMPLETED
