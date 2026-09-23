@@ -70,3 +70,9 @@
 ---
 
 <!-- Entries begin below this line. Append only. -->
+
+### 2026-09-24 03:14 — P1-T001: Implement OHLC Candle & Signal Data Structures
+**Owner:** senior-backend-engineer
+**Changed:** engine/__init__.py, engine/models.py
+**Verified:** Command `python -c "import engine.models"` passed (exit code 0).
+**Status:** COMPLETED

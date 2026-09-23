@@ -65,89 +65,57 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ---
 
-## Phase 1 — Discovery
+## Phase 1 — Deterministic Rule Engine
 
-**Exit Criteria:** Structured capability map + user personas + PRD + non-goals + open questions logged. Human has approved `plan.md` §1-2 and §8-9.
+**Exit Criteria:** A pure Python module taking closed OHLC candles, detecting Variant A/B sweeps, confirming 3-candle directional continuation, and outputting entry/SL/TP with 10:1 R:R. 100% green unit test suite.
 
-- [ ] **P1-T001** Produce structured capability map
-  - **Owner:** requirement-analyzer
+- [x] **P1-T001** Implement OHLC Candle & Signal Data Structures
+  - **Owner:** senior-backend-engineer
   - **Deps:** —
-  - **Files:** `plan.md`, `docs/discovery/capabilities.md`
-  - **Do:** Analyze the raw requirement. Separate explicitly asked / domain-implied / assumed. Draft `plan.md` §1-2 capability map, SEO scope if public-facing, and technical constraints. Do not choose a stack.
-  - **Accept:** `plan.md` §1-2 populated; every assumption labeled; ambiguities listed for §9.
-  - **Verify:** manual review
+  - **Files:** engine/__init__.py, engine/models.py
+  - **Do:** Define Candle, TradeSignal, SweepEvent, and Direction dataclasses/TypedDicts. Implement integrity validation (chronological timestamps, high >= low, high >= open, high >= close, low <= open, low <= close).
+  - **Accept:** Robust, typed candle and signal data models with validation and serialization.
+  - **Verify:** python -c "import engine.models"
 
-- [ ] **P1-T002** Write PRD, prioritized stories, and non-goals
-  - **Owner:** senior-product-manager
+- [ ] **P1-T002** Implement Liquidity Sweep Detectors (Variant A & Variant B)
+  - **Owner:** senior-backend-engineer
   - **Deps:** P1-T001
-  - **Files:** `plan.md`, `docs/prd.md`
-  - **Do:** Produce a PRD with ruthlessly prioritized user stories (each with a so-that). Fill `plan.md` §8 Non-Goals. Nothing is P0 by default.
-  - **Accept:** Stories are independently buildable; non-goals defend against scope creep.
-  - **Verify:** manual review
+  - **Files:** engine/sweep_detector.py
+  - **Do:** Implement Variant A (candle-to-candle sweep of prior opposite-colored candle's wick/body) and Variant B (swing-level sweep across recent swing highs/lows over configurable lookback). Evaluate closed candles only.
+  - **Accept:** Accurate detection of bullish and bearish sweeps without future look-ahead.
+  - **Verify:** python -c "import engine.sweep_detector"
 
-- [ ] **P1-T003** Personas, journeys, and task flows
-  - **Owner:** ux-researcher
+- [ ] **P1-T003** Implement 3-Candle Confirmation & 10:1 R:R Calculator
+  - **Owner:** senior-backend-engineer
   - **Deps:** P1-T001
-  - **Files:** `docs/discovery/personas.md`, `docs/discovery/journeys.md`
-  - **Do:** Write behavioral personas and end-to-end journeys including pre/post product touchpoints. Flag any core action that takes more than a few steps.
-  - **Accept:** At least one primary and one secondary persona; journeys cover the PRD's P0 stories.
-  - **Verify:** manual review
+  - **Files:** engine/confirmation.py
+  - **Do:** Implement 3-consecutive-candle directional confirmation test (all 3 candles closing green for long, red for short). Calculate Entry at candle 3 close, Stop-Loss beyond candle 1 extreme (accounting for spread/buffer on shorts), and Take-Profit at 10x risk distance. Discard on broken sequence.
+  - **Accept:** Exact confirmation evaluation and mathematical 10:1 R:R calculation.
+  - **Verify:** python -c "import engine.confirmation"
 
-- [ ] **P1-T004** Competitor interaction-pattern analysis
-  - **Owner:** design-researcher
-  - **Deps:** P1-T001
-  - **Files:** `docs/discovery/competitors.md`
-  - **Do:** Analyze named comparables' core flows. Recommend patterns to adopt or reject. Interaction patterns only — not visual identity.
-  - **Accept:** Each finding names a specific product and flow, plus a recommendation.
-  - **Verify:** manual review
+- [ ] **P1-T004** ★ Consolidated Core Rule Engine
+  - **Owner:** senior-system-architect
+  - **Deps:** P1-T001, P1-T002, P1-T003
+  - **Files:** engine/rule_engine.py
+  - **Do:** Assemble the unified RuleEngine class/function taking closed OHLC candles and returning None or TradeSignal. Walks closed bars chronologically, manages sweep state transitions, verifies confirmations, and outputs trade parameters. Zero ML/RL dependencies.
+  - **Accept:** Rule engine strictly operates on closed candles; returns TradeSignal matching all specification rules.
+  - **Verify:** python -c "import engine.rule_engine"
 
-- [ ] **P1-T005** Visual moodboard and anti-patterns
-  - **Owner:** pinterest-researcher
-  - **Deps:** P1-T001
-  - **Files:** `docs/discovery/moodboard.md`
-  - **Do:** Direction for color, typography mood, imagery, and explicit category anti-patterns. Do not pick a final palette.
-  - **Accept:** Direction is reasoned against the product category and brand personality.
-  - **Verify:** manual review
+- [ ] **P1-T005** Comprehensive Test Suite for Rule Engine
+  - **Owner:** senior-qa-architect
+  - **Deps:** P1-T004
+  - **Files:** tests/test_rule_engine.py
+  - **Do:** Write exhaustive unit test suite testing Variant A/B bullish/bearish sweeps, 3-candle confirmation successes/failures, SL/TP mathematics for both directions, and edge cases (gap, incomplete bars, flat bars).
+  - **Accept:** All tests pass cleanly with 100% coverage on rule engine logic.
+  - **Verify:** python -m unittest tests.test_rule_engine -v
 
-- [ ] **P1-T006** Synthesize open questions and conversion copy outline
-  - **Owner:** content-designer
-  - **Deps:** P1-T002, P1-T003
-  - **Files:** `plan.md`, `docs/discovery/copy-outline.md`
-  - **Do:** Draft conversion-critical microcopy outline (onboarding, empty states, errors, CTAs) and push remaining ambiguities into `plan.md` §9.
-  - **Accept:** `plan.md` §9 lists every genuine ambiguity with the assumption made; copy outline covers P0 flows.
-  - **Verify:** manual review
-
-- [ ] **P1-T007** Define funnel, north-star metric, and ethical CRO guardrails
-  - **Owner:** growth-cro-engineer
-  - **Deps:** P1-T002, P1-T003
-  - **Files:** `docs/discovery/funnel.md`, `docs/discovery/experiment-principles.md`
-  - **Do:** Map acquisition, signup, activation, core value, retention, and monetization. Define one north-star outcome, guardrails, and conversion hypotheses without dark patterns.
-  - **Accept:** Every P0 journey has a measurable activation outcome and a trustworthy primary action.
-  - **Verify:** manual review
-
-- [ ] **P1-T008** Create privacy-aware product measurement plan
-  - **Owner:** product-analytics-engineer
-  - **Deps:** P1-T002, P1-T003
-  - **Files:** `docs/analytics/measurement-plan.md`
-  - **Do:** Define versioned funnel events, non-sensitive properties, consent behavior, attribution, experiment exposure, deduplication, and quality checks.
-  - **Accept:** Every event supports a named product decision; no raw PII is collected by default.
-  - **Verify:** manual review
-
-- [ ] **P1-T009** Define public route and technical SEO contract
-  - **Owner:** technical-seo-engineer
-  - **Deps:** P1-T002
-  - **Files:** `docs/seo/technical-seo.md`
-  - **Do:** Map public routes to search intent, rendering, title/description, H1, canonical, indexability, structured data, social preview, and conversion goal.
-  - **Accept:** Every public route has an explicit indexability decision and truthful search-to-value path.
-  - **Verify:** manual review
-
-- [ ] **P1-G1** 🧑 HUMAN Approve discovery plan
+- [ ] **P1-G1** Phase 1 Rule Engine Verification Gate
   - **Owner:** coordinator
-  - **Deps:** P1-T002, P1-T003, P1-T004, P1-T005, P1-T006, P1-T007, P1-T008, P1-T009
-  - **Files:** `plan.md`
-  - **Do:** Human stakeholder reads and approves `plan.md` §1-2 and §8-9. Coordinator records the decision.
-  - **Accept:** Written approval in PROGRESS.md. No hidden ambiguities remain.
-  - **Verify:** manual review
+  - **Deps:** P1-T005
+  - **Files:** docs/qa/phase1-report.md
+  - **Do:** Execute full test suite, verify rule engine meets all Phase 1 specifications, and write Phase 1 verification report.
+  - **Accept:** Complete report in docs/qa/phase1-report.md confirming zero intrabar leakage, exact 10:1 math, and passing tests.
+  - **Verify:** python -m unittest tests.test_rule_engine -v
 
 ---
 
