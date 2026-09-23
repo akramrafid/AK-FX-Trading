@@ -213,7 +213,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** 100% green test suite validating live bridge pipeline.
   - **Verify:** python tests/test_bridge.py
 
-- [ ] **P3-G1** Phase 3 Bridge Verification Gate
+- [x] **P3-G1** Phase 3 Bridge Verification Gate
   - **Owner:** coordinator
   - **Deps:** P3-T005
   - **Files:** docs/qa/phase3-report.md
