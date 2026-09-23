@@ -85,7 +85,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Accurate detection of bullish and bearish sweeps without future look-ahead.
   - **Verify:** python -c "import engine.sweep_detector"
 
-- [ ] **P1-T003** Implement 3-Candle Confirmation & 10:1 R:R Calculator
+- [x] **P1-T003** Implement 3-Candle Confirmation & 10:1 R:R Calculator
   - **Owner:** senior-backend-engineer
   - **Deps:** P1-T001
   - **Files:** engine/confirmation.py
