@@ -223,9 +223,47 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ---
 
-## Phase 4 — Build
+## Phase 4 — Non-Bypassable Risk Guardrails & Circuit Breakers
 
-Generate after design sign-off (`phases/PHASE-4-BUILD.md`). Every task must have Owner, Files, Accept, and a Verify command that exits 0.
+- [ ] **P4-T001** Risk State & Invariant Models
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P3-G1
+  - **Files:** risk/models.py, risk/__init__.py
+  - **Do:** Define immutable data models for AccountState, RiskLimits, TradeRejectionReason, DailyPnLTracker, and ValidationResult.
+  - **Accept:** Strongly typed domain models for account balances, daily loss calculations, and trade constraints.
+  - **Verify:** python -c "import risk.models"
+
+- [ ] **P4-T002** Non-Bypassable Risk Guardrails Engine
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P4-T001
+  - **Files:** risk/guardrails.py
+  - **Do:** Implement standalone RiskGuardrails with non-bypassable validate_trade() evaluating daily loss limits (3.0%), max open trades (default 1), max daily trades (default 3), spread ceiling (default 2.5 pips), and session time filter (London/NY 07:00-17:00 UTC).
+  - **Accept:** Every trade passed through mandatory validation; zero bypass allowed.
+  - **Verify:** python -c "import risk.guardrails"
+
+- [ ] **P4-T003** Bridge & Risk Integration Pipeline
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P4-T002
+  - **Files:** bridge/executor.py
+  - **Do:** Integrate RiskGuardrails directly into BridgeExecutor._execute_signal() preceding command dispatch. If rejected by risk, log rejection and prevent order submission.
+  - **Accept:** Bridge rejecting trades whenever risk guardrails or circuit breakers trip.
+  - **Verify:** python -c "import bridge.executor"
+
+- [ ] **P4-T004** Risk Guardrails & Circuit Breaker Test Suite
+  - **Owner:** senior-qa-architect
+  - **Deps:** P4-T002, P4-T003
+  - **Files:** tests/test_risk.py
+  - **Do:** Author comprehensive test suite testing daily loss halt, max open trades, max daily trades, spread filter, session window filter, and emergency halt.
+  - **Accept:** 100% green test suite verifying complete risk containment.
+  - **Verify:** python tests/test_risk.py
+
+- [ ] **P4-G1** Phase 4 Risk Guardrails Verification Gate
+  - **Owner:** coordinator
+  - **Deps:** P4-T004
+  - **Files:** docs/qa/phase4-report.md
+  - **Do:** Verify all risk guardrail tests, validate circuit breaker trip actions, and produce Phase 4 verification report.
+  - **Accept:** Comprehensive Phase 4 verification report confirming zero bypassable routes and full risk containment.
+  - **Verify:** python tests/test_risk.py
 
 ---
 
