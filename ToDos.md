@@ -145,7 +145,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Exact formula computations matching standard financial reporting.
   - **Verify:** python -c "import engine.metrics"
 
-- [ ] **P2-T004** ★ PostgreSQL Schema & Trade Journal Data Layer
+- [x] **P2-T004** ★ PostgreSQL Schema & Trade Journal Data Layer
   - **Owner:** senior-database-architect
   - **Deps:** P1-G1
   - **Files:** database/schema.sql

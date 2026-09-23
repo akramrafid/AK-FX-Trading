@@ -126,3 +126,9 @@
 **Changed:** engine/metrics.py
 **Verified:** Command `python -c "import engine.metrics"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:24 — P2-T004: PostgreSQL Schema & Trade Journal Data Layer
+**Owner:** senior-database-architect
+**Changed:** database/schema.sql
+**Verified:** Command `python -c "open('database/schema.sql').read()"` passed (exit code 0).
+**Status:** COMPLETED
