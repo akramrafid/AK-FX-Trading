@@ -119,11 +119,55 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ---
 
-## Phase 2 — Architecture
+## Phase 2 — Architecture & Backtesting
 
-Generate after Phase 1 sign-off (`PROMPT_LIBRARY.md` §3 / `phases/PHASE-2-ARCHITECTURE.md`). Do not invent Phase 2 tasks before Hard Rules are approved.
+- [x] **P2-T001** Historical Data Ingestion Pipeline
+  - **Owner:** senior-data-engineer
+  - **Deps:** P1-G1
+  - **Files:** data/loader.py
+  - **Do:** Implement historical OHLCV data loader supporting Dukascopy and MT4 CSV formats, timestamp validation, timezone conversion to UTC, missing candle detection, and candle generation into Candle models.
+  - **Accept:** Loads and normalizes historical CSV into sorted, validated Candle sequence.
+  - **Verify:** python -c "import data.loader"
 
-**Required owners:** `senior-system-architect` ★, `senior-system-designer`, `senior-database-architect` ★, `senior-security-engineer` ★, `senior-privacy-engineer` ★, `senior-sre-observability-engineer` ★, `senior-cloud-architect`, `senior-technical-writer`, `senior-ai-engineer` ★ (AI/ML & Hybrid only).
+- [ ] **P2-T002** Event-Driven Backtest Simulator
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P2-T001
+  - **Files:** engine/backtester.py
+  - **Do:** Implement event-driven backtesting engine iterating over closed M5 candles using the exact RuleEngine from Phase 1. Incorporate bid/ask spread modeling, slippage simulation (in pips), dynamic lot sizing calculation, position lifecycle tracking, and trade outcome accounting.
+  - **Accept:** Zero lookahead bias; accurate fill simulation at next candle open or immediate close timestamp; exact PnL and R-multiple tracking.
+  - **Verify:** python -c "import engine.backtester"
+
+- [ ] **P2-T003** Performance & Risk Metrics Calculator
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P2-T002
+  - **Files:** engine/metrics.py
+  - **Do:** Implement quantitative metrics calculator computing total trades, win rate %, average R-multiple, profit factor, maximum equity drawdown (% and currency), maximum consecutive losses, Sharpe ratio, and trade duration stats.
+  - **Accept:** Exact formula computations matching standard financial reporting.
+  - **Verify:** python -c "import engine.metrics"
+
+- [ ] **P2-T004** ★ PostgreSQL Schema & Trade Journal Data Layer
+  - **Owner:** senior-database-architect
+  - **Deps:** P1-G1
+  - **Files:** database/schema.sql
+  - **Do:** Design PostgreSQL DDL schema for trading system: candles, sweep_events, trade_signals, orders, fills, daily_metrics, and audit logs. Define constraints, foreign keys, timestamps with timezone, and composite indexes on (symbol, timeframe, timestamp).
+  - **Accept:** Clean SQL schema adhering to financial precision invariants (numeric/decimal types for prices/lots, no floating point for money).
+  - **Verify:** python -c "open('database/schema.sql').read()"
+
+- [ ] **P2-T005** Backtester Verification Test Suite
+  - **Owner:** senior-qa-architect
+  - **Deps:** P2-T002, P2-T003, P2-T004
+  - **Files:** tests/test_backtester.py
+  - **Do:** Implement comprehensive unit and integration test suite for the data loader, backtester engine, spread/slippage modeling, and metrics engine with synthetic multi-month market cycles.
+  - **Accept:** 100% green test suite validating backtesting mechanics and metrics computation.
+  - **Verify:** python tests/test_backtester.py
+
+- [ ] **P2-G1** Phase 2 Architecture & Backtest Verification Gate
+  - **Owner:** coordinator
+  - **Deps:** P2-T005
+  - **Files:** docs/qa/phase2-report.md
+  - **Do:** Execute full backtest suite, generate performance metrics on multi-year sample data, verify risk metrics, and document backtest findings and system architecture in docs/qa/phase2-report.md.
+  - **Accept:** Comprehensive Phase 2 verification report detailing win rate, average R, max drawdown, and strategy viability.
+  - **Verify:** python tests/test_backtester.py
 
 ---
 
