@@ -77,7 +77,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Robust, typed candle and signal data models with validation and serialization.
   - **Verify:** python -c "import engine.models"
 
-- [ ] **P1-T002** Implement Liquidity Sweep Detectors (Variant A & Variant B)
+- [x] **P1-T002** Implement Liquidity Sweep Detectors (Variant A & Variant B)
   - **Owner:** senior-backend-engineer
   - **Deps:** P1-T001
   - **Files:** engine/sweep_detector.py

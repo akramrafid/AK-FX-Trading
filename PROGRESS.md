@@ -76,3 +76,9 @@
 **Changed:** engine/__init__.py, engine/models.py
 **Verified:** Command `python -c "import engine.models"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:14 — P1-T002: Implement Liquidity Sweep Detectors (Variant A & Variant B)
+**Owner:** senior-backend-engineer
+**Changed:** engine/sweep_detector.py
+**Verified:** Command `python -c "import engine.sweep_detector"` passed (exit code 0).
+**Status:** COMPLETED
