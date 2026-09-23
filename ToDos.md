@@ -109,7 +109,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** All tests pass cleanly with 100% coverage on rule engine logic.
   - **Verify:** python tests/test_rule_engine.py
 
-- [ ] **P1-G1** Phase 1 Rule Engine Verification Gate
+- [x] **P1-G1** Phase 1 Rule Engine Verification Gate
   - **Owner:** coordinator
   - **Deps:** P1-T005
   - **Files:** docs/qa/phase1-report.md
