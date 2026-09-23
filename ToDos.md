@@ -173,10 +173,10 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ## Phase 3 — MT4 Execution Bridge
 
-- [ ] **P3-T001** DWX Connect Protocol & Command Handler
+- [x] **P3-T001** DWX Connect Protocol & Command Handler
   - **Owner:** senior-integration-engineer
   - **Deps:** P2-G1
-  - **Files:** bridge/dwx_client.py
+  - **Files:** bridge/dwx_client.py, bridge/__init__.py
   - **Do:** Implement DWX Connect file-based client protocol. Reads bar data files written by MT4 EA, formats execution commands (OPEN, MODIFY, CLOSE) to command files, reads trade execution reports, and tracks open orders.
   - **Accept:** Clean read/write file protocol with atomic file locking and error handling.
   - **Verify:** python -c "import bridge.dwx_client"
