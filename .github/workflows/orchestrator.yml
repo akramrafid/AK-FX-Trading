@@ -1,0 +1,39 @@
+name: orchestrator
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run orchestrator tests
+        run: python -m unittest discover -s tests -v
+      - name: Lint templates via doctor (init in temp)
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          import shutil
+          from orchestrator.engine import OrchestratorEngine
+          root = Path(".").resolve()
+          td = Path(tempfile.mkdtemp())
+          shutil.copytree(root / "templates", td / "templates")
+          shutil.copytree(root / "agents", td / "agents")
+          shutil.copytree(root / "phases", td / "phases")
+          eng = OrchestratorEngine(workspace_root=td)
+          ok, msg = eng.init_project("CI", track="Hybrid")
+          assert ok, msg
+          errors = eng.lint()
+          assert not errors, errors
+          print("lint clean")
+          PY

@@ -1,0 +1,5 @@
+include README.md GETTING-STARTED.md GLOBAL-RULES.md PROMPT_LIBRARY.md AGENTS.md
+recursive-include agents *.md
+recursive-include phases *.md
+recursive-include templates *.md *.yaml *.yml *.ts
+recursive-include integrations *.md

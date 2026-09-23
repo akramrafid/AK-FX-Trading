@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# POSIX wrapper for akstack orchestrator
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$DIR" python3 -m orchestrator.cli "$@"
