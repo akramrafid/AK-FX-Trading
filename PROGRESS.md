@@ -120,3 +120,9 @@
 **Changed:** engine/backtester.py
 **Verified:** Command `python -c "import engine.backtester"` passed (exit code 0).
 **Status:** COMPLETED
+
+### 2026-09-24 03:23 — P2-T003: Performance & Risk Metrics Calculator
+**Owner:** senior-backend-engineer
+**Changed:** engine/metrics.py
+**Verified:** Command `python -c "import engine.metrics"` passed (exit code 0).
+**Status:** COMPLETED

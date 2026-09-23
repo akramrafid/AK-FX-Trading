@@ -137,7 +137,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Zero lookahead bias; accurate fill simulation at next candle open or immediate close timestamp; exact PnL and R-multiple tracking.
   - **Verify:** python -c "import engine.backtester"
 
-- [ ] **P2-T003** Performance & Risk Metrics Calculator
+- [x] **P2-T003** Performance & Risk Metrics Calculator
   - **Owner:** senior-backend-engineer
   - **Deps:** P2-T002
   - **Files:** engine/metrics.py
