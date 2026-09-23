@@ -171,13 +171,55 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
 
 ---
 
-## Phase 3 — Design
+## Phase 3 — MT4 Execution Bridge
 
-Generate after architecture sign-off (`phases/PHASE-3-DESIGN.md`). Persist `design-system/MASTER.md` before any frontend/mobile coding.
+- [ ] **P3-T001** DWX Connect Protocol & Command Handler
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P2-G1
+  - **Files:** bridge/dwx_client.py
+  - **Do:** Implement DWX Connect file-based client protocol. Reads bar data files written by MT4 EA, formats execution commands (OPEN, MODIFY, CLOSE) to command files, reads trade execution reports, and tracks open orders.
+  - **Accept:** Clean read/write file protocol with atomic file locking and error handling.
+  - **Verify:** python -c "import bridge.dwx_client"
 
-For Product/Web and Hybrid, Phase 3 must include tasks owned by `senior-product-designer`, `ui-designer`, `design-system-engineer`, `content-designer`, `growth-cro-engineer`, `product-analytics-engineer`, `technical-seo-engineer`, and `senior-accessibility-engineer`. Screen tasks use `templates/screen-spec.template.md`; do not start frontend implementation with a placeholder Master or unapproved screen spec.
+- [ ] **P3-T002** Dynamic Position Sizing & Currency Pip Value Engine
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P3-T001
+  - **Files:** bridge/sizing.py
+  - **Do:** Implement precision dynamic position sizing with quote currency exchange rate awareness for major/cross pairs (EUR/USD, GBP/USD, USD/JPY, EUR/JPY, AUD/USD). Implements hard bounds (0.01 lot min, 50.0 lot max) and accounts for quote currency pip value.
+  - **Accept:** Exact lot size computation compliant with Hard Rule 3.
+  - **Verify:** python -c "import bridge.sizing"
 
-End Phase 3 with `P3-G1` HUMAN design sign-off. It must approve the resolved `design-system/MASTER.md`, screen-spec set, measurement plan, technical SEO contract, and accessibility spec before any Product/Web or Hybrid Phase 4 task may start.
+- [ ] **P3-T003** MT4 Bar Poller & Signal Execution Bridge
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P3-T001, P3-T002
+  - **Files:** bridge/executor.py
+  - **Do:** Build the unified bridge runner that watches the MT4 incoming candle file, passes closed bars to RuleEngine, computes position sizing on signal, and writes idempotent order commands with deterministic magic numbers.
+  - **Accept:** Closed-bar event loop triggering orders on confirmed 3-candle breakouts.
+  - **Verify:** python -c "import bridge.executor"
+
+- [ ] **P3-T004** MQL4 Expert Advisor Specification & Script
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P3-T001
+  - **Files:** bridge/mql4/DWX_AutoTrader.mq4
+  - **Do:** Provide the complete, production-grade MQL4 Expert Advisor designed to attach to MT4 charts. On new bar (time change), writes closed OHLC to DWX bar file, polls DWX command file, executes market orders with slippage tolerance and magic number, and logs fills.
+  - **Accept:** Valid MQL4 source script ready for MT4 MetaEditor compilation.
+  - **Verify:** python -c "open('bridge/mql4/DWX_AutoTrader.mq4').read()"
+
+- [ ] **P3-T005** Bridge & Execution Simulation Test Suite
+  - **Owner:** senior-qa-architect
+  - **Deps:** P3-T003, P3-T004
+  - **Files:** tests/test_bridge.py
+  - **Do:** Write end-to-end integration tests for DWX file protocol, mock MT4 bar generation, command writing, idempotency checking, and error recovery on locked/malformed files.
+  - **Accept:** 100% green test suite validating live bridge pipeline.
+  - **Verify:** python tests/test_bridge.py
+
+- [ ] **P3-G1** Phase 3 Bridge Verification Gate
+  - **Owner:** coordinator
+  - **Deps:** P3-T005
+  - **Files:** docs/qa/phase3-report.md
+  - **Do:** Run bridge test suite, verify file protocol roundtrip, validate position sizing edge cases, and compile Phase 3 gate report.
+  - **Accept:** Comprehensive Phase 3 verification report confirming MT4 EA readiness, atomic command protocol, and passing tests.
+  - **Verify:** python tests/test_bridge.py
 
 ---
 
