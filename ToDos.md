@@ -153,7 +153,7 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Clean SQL schema adhering to financial precision invariants (numeric/decimal types for prices/lots, no floating point for money).
   - **Verify:** python -c "open('database/schema.sql').read()"
 
-- [ ] **P2-T005** Backtester Verification Test Suite
+- [x] **P2-T005** Backtester Verification Test Suite
   - **Owner:** senior-qa-architect
   - **Deps:** P2-T002, P2-T003, P2-T004
   - **Files:** tests/test_backtester.py
