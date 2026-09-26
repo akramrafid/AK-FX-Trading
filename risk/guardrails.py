@@ -112,16 +112,17 @@ class RiskGuardrails:
             self._record_decision(res)
             return res
 
-        # 4. Maximum Daily Trades Constraint
-        if account_state.daily_trades_count >= self.limits.max_daily_trades:
-            res = ValidationResult(
-                is_allowed=False,
-                reason=TradeRejectionReason.MAX_DAILY_TRADES_REACHED,
-                message=f"Max daily trades limit reached: {account_state.daily_trades_count}/{self.limits.max_daily_trades} trades executed today.",
-                timestamp=now_utc,
-            )
-            self._record_decision(res)
-            return res
+        # 4. Maximum Daily Trades Constraint (enforced only when limit is set; None or <= 0 = unlimited)
+        if self.limits.max_daily_trades is not None and self.limits.max_daily_trades > 0:
+            if account_state.daily_trades_count >= self.limits.max_daily_trades:
+                res = ValidationResult(
+                    is_allowed=False,
+                    reason=TradeRejectionReason.MAX_DAILY_TRADES_REACHED,
+                    message=f"Max daily trades limit reached: {account_state.daily_trades_count}/{self.limits.max_daily_trades} trades executed today.",
+                    timestamp=now_utc,
+                )
+                self._record_decision(res)
+                return res
 
         # 5. Broker Spread Filter
         if account_state.current_spread_pips > self.limits.max_spread_pips:
@@ -136,7 +137,7 @@ class RiskGuardrails:
             self._record_decision(res)
             return res
 
-        # 6. Session Hours Filter (London & New York Sessions: 07:00 - 17:00 UTC)
+        # 6. Session Hours Filter (London, Overlap & NY Sessions: 07:00 - 21:00 UTC)
         if self.limits.session_filter_enabled:
             hour = now_utc.hour
             if hour < self.limits.session_start_hour_utc or hour >= self.limits.session_end_hour_utc:
@@ -194,6 +195,8 @@ class RiskGuardrails:
         logger.critical(f"EMERGENCY HALT ACTIVATED: {reason}")
         if self.alert_callback:
             self.alert_callback(f"EMERGENCY HALT: {reason}")
+
+    trigger_emergency_halt = trip_emergency_halt
 
     def reset_emergency_halt(self) -> None:
         """Clears emergency halt status."""

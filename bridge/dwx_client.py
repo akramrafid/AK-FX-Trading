@@ -178,8 +178,17 @@ class DWXClient:
         return self.files_dir / "DWX_Reports.txt"
 
     def get_bars_file(self, symbol: str, timeframe: str = "M5") -> Path:
-        clean_symbol = symbol.replace("/", "").upper()
-        return self.files_dir / f"DWX_Bars_{clean_symbol}_{timeframe.upper()}.txt"
+        clean_symbol = symbol.strip().replace("/", "")
+        clean_tf = timeframe.strip().upper()
+        exact_path = self.files_dir / f"DWX_Bars_{clean_symbol}_{clean_tf}.txt"
+        if exact_path.exists():
+            return exact_path
+        target_name = f"dwx_bars_{clean_symbol.lower()}_{clean_tf.lower()}.txt"
+        if self.files_dir.is_dir():
+            for f in self.files_dir.iterdir():
+                if f.name.lower() == target_name:
+                    return f
+        return exact_path
 
     # -------------------------------------------------------------------------
     # Atomic File Operations with Exponential Backoff
@@ -258,7 +267,7 @@ class DWXClient:
         cmd = TradeCommand(
             command_id=command_id,
             action=CommandAction.OPEN,
-            symbol=symbol.replace("/", "").upper(),
+            symbol=symbol.strip().replace("/", ""),
             order_type=order_type,
             lots=lots,
             sl=sl,

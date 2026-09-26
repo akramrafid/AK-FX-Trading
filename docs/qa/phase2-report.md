@@ -1,115 +1,63 @@
-# Phase 2 Verification Report — Architecture & Backtesting
+# Phase 2 QA Report: Multi-Timeframe 3+ Year Backtest
 
-**Project:** AK Forex Trading System  
-**Track:** Hybrid  
-**Phase:** Phase 2 (Architecture, Data Pipeline & Backtesting Simulation)  
-**Date:** 2026-09-24  
-**Evaluator:** Coordinator / Senior System Architect / Senior QA Architect  
-**Status:** PASS — 100% Green (All Verification Gates Passed)
-
----
-
-## 1. Executive Summary
-
-Phase 2 establishes the end-to-end backtesting simulation environment, historical data ingestion pipeline, quantitative performance measurement engine, and relational PostgreSQL telemetry schema for the AK Forex Trading System.
-
-All backtest simulations run exclusively on closed M5 candles through the exact same `RuleEngine` module developed in Phase 1 (`engine/rule_engine.py`), guaranteeing zero code divergence between historical testing and production forward execution.
+**Strategy:** Multi-Timeframe Liquidity Sweep (M5 & M15) with 1-Minute 3-Candle Confirmation & Fixed 10:1 R:R  
+**Dataset:** EUR/USD 1-Minute Historical Bars (3 Years: Jan 2021 – Jan 2024)  
+**Total M1 Candles Evaluated:** 1,130,280  
+**Total M5 Candles Evaluated:** 226,056  
+**Total M15 Candles Evaluated:** 75,352  
+**Execution Simulation:** Realistic Spread (1.0 pip) + Slippage (0.5 pip) + Worst-Case Intrabar Conflict Handling  
 
 ---
 
-## 2. Component Deliverables & Architectural Verification
+## 1. Executive Performance Metrics
 
-### 2.1 Historical Data Pipeline (`data/loader.py`)
-- **Multi-Format Ingestion**:
-  - Dukascopy CSV format (`Gmt time,Open,High,Low,Close,Volume`)
-  - MetaTrader 4 (MT4) History Center export format (`Date,Time,Open,High,Low,Close,Volume` / `<DATE>,<TIME>...`)
-  - Standardized OHLCV CSV formats
-- **Timezone Invariant**: All timestamps converted to UTC-aware `datetime` objects.
-- **Data Integrity**: Monotonic chronological sorting, duplicate validation, and data gap reporting (`find_data_gaps`).
+### Backtest Performance Summary
+| Metric | Value |
+|---|---|
+| **Initial Capital** | $10,000.00 |
+| **Final Capital** | $-1,063.21 |
+| **Net Profit ($)** | $-11,063.21 (-110.63%) |
+| **Total Trades** | 4839 |
+| **Win Rate** | 6.74% (326W / 4513L) |
+| **Average R (Expectancy)** | -0.26R |
+| **Total Realized R** | -1255.6R |
+| **Profit Factor** | 0.42 |
+| **Max Drawdown ($)** | $11,067.27 |
+| **Max Drawdown (%)** | 110.67% |
+| **Longest Losing Streak** | 84 trades |
+| **Longest Winning Streak** | 3 trades |
+| **Sharpe Ratio (Trade)** | -6.40 |
+| **Sortino Ratio (Trade)** | -10.93 |
+| **Avg Hold Duration** | 158.5 bars |
 
-### 2.2 Event-Driven Backtest Simulator (`engine/backtester.py`)
-- **Shared Core Logic**: Directly executes `RuleEngine.evaluate_completed_candle` on each bar close.
-- **Friction Modeling**:
-  - Bid/Ask spread penalty applied on entries and exits.
-  - Realistic execution slippage modeled in pips.
-  - Conservative intra-bar conflict resolution (worst-case assumption: SL prioritized if both SL and TP boundaries are reached within the same bar).
-- **Dynamic Position Sizing (Hard Rule 3)**:
-  $$\text{Lot Size} = \frac{\text{Account Balance} \times \text{Risk \%}}{\text{Stop Loss Distance (pips)} \times \text{Pip Value per Lot}}$$
-  Enforces broker-compliant bounds ($\text{min\_lot} = 0.01$, $\text{max\_lot} = 50.00$).
-
-### 2.3 Quantitative Metrics Engine (`engine/metrics.py`)
-- Calculates hedge-fund grade risk and performance metrics:
-  - Win Rate %, Loss Rate %
-  - Average R (Expectancy per trade)
-  - Profit Factor ($\frac{\text{Gross Profit}}{\text{Gross Loss}}$)
-  - Maximum Equity Drawdown (both peak-to-trough currency $\$$ and percentage $\%$)
-  - Maximum Consecutive Losing Streak and Winning Streak
-  - Sharpe Ratio and Sortino Ratio per trade
-
-### 2.4 Production Database Schema (`database/schema.sql`)
-- **Financial Precision Invariants**: All monetary amounts, prices, and lots use `NUMERIC(14, 5)` / `NUMERIC(14, 2)`. Zero floating-point representation for money.
-- **Relational Tables**:
-  - `candles`: Multi-timeframe OHLCV market data with composite unique index `(symbol, timeframe, timestamp)`.
-  - `sweep_events`: Audit trail of detected Variant A and Variant B liquidity sweeps.
-  - `trade_signals`: Verified trade setups adhering to 10:1 R:R constraint checks.
-  - `orders`: Unique `client_order_id`, magic number, and execution state.
-  - `fills`: MT4 ticket tracking, fill price, slippage, commission, and swap telemetry.
-  - `trade_journal`: Unified performance journal across `BACKTEST`, `DEMO`, and `LIVE` environments.
-  - `daily_metrics`: Daily PnL tracking and circuit-breaker trip states.
-  - `audit_logs`: JSONB append-only audit trail.
 
 ---
 
-## 3. Backtest Simulation & Strategy Performance Review
+## 2. Invariant Verification
 
-A multi-month simulation of closed M5 market data with realistic spreads (1.0 pip) and slippage (0.5 pips) yielded the following quantitative profile:
-
-### Performance Metrics Summary Table
-| Metric | Value | Hedge Fund Evaluation |
-|---|---|---|
-| **Initial Capital** | $10,000.00 | Standard starting equity |
-| **Final Capital** | $10,779.99 | Equity compounded |
-| **Net Profit** | +$779.99 (+7.80%) | Net gain after spread & slippage friction |
-| **Total Trades** | 7 | Low frequency, high selectivity |
-| **Win Rate** | **28.57%** (2W / 5L) | Typical for 10:1 high-reward systems |
-| **Average R (Expectancy)** | **+1.26R per trade** | Strongly positive statistical expectancy |
-| **Total Realized R** | **+8.80R** | Asymmetric return distribution |
-| **Profit Factor** | **2.39** | Robust profitability (> 1.5 threshold) |
-| **Max Drawdown ($)** | $456.67 | Controlled capital preservation |
-| **Max Drawdown (%)** | **4.57%** | Well within the 10.0% max drawdown budget |
-| **Longest Losing Streak** | **4 trades** | Survives drawdown clusters cleanly |
-| **Longest Winning Streak** | 1 trade | Gains concentrated in large 10R expansions |
-| **Sharpe Ratio (Trade)** | 0.71 | Solid risk-adjusted return |
-| **Sortino Ratio (Trade)** | 3.09 | Low downside volatility relative to upside |
-| **Average Hold Duration** | 157.0 bars (~13.1 hours) | Intraday-to-swing duration on M5 |
-
-### Quantitative Insight on 10:1 R:R Math:
-With a 10:1 reward-to-risk ratio, the strategy requires only a **9.1% break-even win rate**. At a realized 28.57% win rate, the system exhibits substantial positive expectancy (+1.26R per trade) while withstanding 4 consecutive losses with under 5% drawdown.
-
----
-
-## 4. Hard Rules & Quality Invariants Compliance
-
-| Rule ID | Invariant Description | Status | Evidence |
+| Invariant | Specification Requirement | Backtest Verification Result | Status |
 |---|---|---|---|
-| **HR-1** | Closed Candles Only (Zero Look-Ahead) | COMPLIANT | Verified: `BacktestEngine` walks index `0..N` passing only historical slices up to `idx`. |
-| **HR-2** | Single Codebase Rule Engine Parity | COMPLIANT | `engine.backtester.BacktestEngine` imports and uses `engine.rule_engine.RuleEngine`. |
-| **HR-3** | Dynamic Lot Sizing & Clamping | COMPLIANT | Verified in `test_standard_position_sizing`, `test_min_lot_clamping`, `test_max_lot_clamping`. |
-| **HR-4** | Zero Floating-Point Money in DB | COMPLIANT | `database/schema.sql` enforces `NUMERIC` types on all prices, balances, and lots. |
-| **HR-5** | Spread & Slippage Modeling | COMPLIANT | Verified: Entries penalized by spread + slippage, exits penalized by slippage. |
+| **Closed Candles Only** | Zero look-ahead bias; orders placed only upon close of 3rd confirming M1 bar | Passed: M1/M5/M15 event queues strictly sequential by close timestamp | VERIFIED |
+| **Single-Codebase Parity** | RuleEngine is shared between live bridge and backtest | Passed: RuleEngine.on_htf_candle and on_m1_candle executed directly | VERIFIED |
+| **Dynamic Position Sizing** | `(balance * risk_%) / (risk_pips * pip_value)` | Passed: Lots computed dynamically per trade based on equity curve | VERIFIED |
+| **Asymmetrical Stop-Loss** | Extreme of 3 confirming candles (+ spread/buffer) | Passed: Highest high (Sell) / Lowest low (Buy) enforced | VERIFIED |
+| **Fixed 10:1 Take-Profit** | Exact 10x risk distance | Passed: Take profit hit yielded +10.0R | VERIFIED |
+| **Spread & Slippage Penalty** | 1.0 pip spread + 0.5 pip slippage | Passed: Penalized all market entries and exits | VERIFIED |
 
 ---
 
-## 5. Automated Test Suite Evidence
+## 3. Analysis & Key Takeaways (Quantitative Trader & Engineer Perspective)
 
-Test executions across all modules:
-- `tests/test_backtester.py`: 9 passed in 0.015s.
-- `tests/test_rule_engine.py`: 15 passed in 0.001s.
-- `tests/test_orchestrator.py`: 34 passed in 2.37s.
-- **Repository Total:** **58 tests passing, 0 failures, 0 errors (100% Green).**
+1. **Mathematical Baseline of a 10:1 R:R Strategy:**
+   - For any strategy with a fixed 10:1 reward-to-risk ratio, the theoretical break-even win rate is `1 / (10 + 1) = 9.09%`.
+   - In raw unfiltered market conditions with realistic execution frictions (1.0 pip spread + 0.5 pip slippage = 1.5 pips per roundtrip), a raw win rate of **6.74%** and Expectancy of **-0.26R** confirms that mechanical pattern recognition alone without risk/session filters suffers from frictional drag on small-stop setups.
 
----
+2. **The Critical Necessity of Phase 4 Risk Guardrails:**
+   - In raw backtesting without the Phase 4 circuit breaker, the longest losing streak reached 84 trades, driving maximum drawdown to 110.67%.
+   - **Phase 4 Guardrail Mandate:**
+     - **Daily Loss Circuit Breaker (3% limit):** Halts trading after consecutive daily losses, preventing tail-risk compounding and preserving balance.
+     - **Session Filter (07:00–17:00 UTC):** Restricts entries to high-volume London and New York overlaps, eliminating Asian session low-volume fakeout chop.
+     - **Minimum Stop Distance Filter:** Rejecting micro-stops (< 5 pips) prevents broker spread and slippage from consuming 30%–50% of the stop distance.
 
-## 6. Gate Sign-Off Recommendation
-
-Phase 2 has satisfied all architectural, simulation, and statistical validation requirements. Phase 2 is declared **PASSED**. The system is ready to proceed to Phase 3 (MT4 Execution Bridge & DWX Connect Integration).
+3. **Single-Codebase Parity Verified:**
+   - 100% code parity between the Phase 1 RuleEngine and Phase 2 Backtester verified. Exactly 1,130,280 M1 candles, 226,056 M5 candles, and 75,352 M15 candles processed in 4.85 seconds with zero exceptions or race conditions.

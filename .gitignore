@@ -15,3 +15,14 @@ venv/
 .idea/
 .vscode/
 .akstack.lock
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.csv
+scratch*.txt
+scratch/
+flutter_app/.dart_tool/
+flutter_app/build/
+flutter_app/.idea/
+flutter_app/*.iml

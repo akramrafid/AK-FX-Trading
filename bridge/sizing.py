@@ -83,30 +83,31 @@ class PositionSizer:
           Pip Value = (100,000 * 0.0001) * GBPUSD_rate.
         """
         clean = symbol.replace("/", "").upper()
+        fx_root = clean[:6] if len(clean) >= 6 else clean
         pip_size = self.get_pip_size(clean)
         rates_dict = rates or {}
 
         # Major pairs quoting in USD
-        if clean.endswith("USD"):
+        if fx_root.endswith("USD"):
             return (self.standard_lot_units * pip_size).quantize(Decimal("0.01"))
 
         # Pairs with USD as base currency
-        if clean.startswith("USD"):
-            rate = current_price or rates_dict.get(clean)
+        if fx_root.startswith("USD"):
+            rate = current_price or rates_dict.get(fx_root) or rates_dict.get(clean)
             if not rate or rate <= 0:
                 # Conservative fallback if rate is unavailable
-                if "JPY" in clean:
+                if "JPY" in fx_root:
                     rate = Decimal("150.00")
-                elif "CAD" in clean:
+                elif "CAD" in fx_root:
                     rate = Decimal("1.35")
-                elif "CHF" in clean:
+                elif "CHF" in fx_root:
                     rate = Decimal("0.90")
                 else:
                     rate = Decimal("1.00")
             return ((self.standard_lot_units * pip_size) / rate).quantize(Decimal("0.01"))
 
         # Cross currency pairs
-        quote = clean[3:] if len(clean) == 6 else clean[-3:]
+        quote = fx_root[3:6] if len(fx_root) == 6 else clean[-3:]
         if quote == "JPY":
             usdjpy = rates_dict.get("USDJPY", Decimal("150.00"))
             return ((self.standard_lot_units * pip_size) / usdjpy).quantize(Decimal("0.01"))

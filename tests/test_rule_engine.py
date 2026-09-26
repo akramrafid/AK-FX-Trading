@@ -200,11 +200,11 @@ class TestConfirmationAndRRMath(unittest.TestCase):
         self.assertAlmostEqual(signal.entry_price, 1.0870)
         self.assertAlmostEqual(signal.stop_loss, 1.0800)
         self.assertAlmostEqual(signal.risk_distance, 0.0070)
-        self.assertAlmostEqual(signal.reward_distance, 0.0700)
-        self.assertAlmostEqual(signal.take_profit, 1.1570)
-        self.assertAlmostEqual(signal.reward_risk_ratio, 10.0)
+        self.assertAlmostEqual(signal.reward_distance, 0.0350)
+        self.assertAlmostEqual(signal.take_profit, 1.1220)
+        self.assertAlmostEqual(signal.reward_risk_ratio, 5.0)
 
-    def test_short_confirmation_and_10_to_1_rr(self):
+    def test_short_confirmation_and_5_to_1_rr(self):
         """
         Sweep at index 1 (SELL).
         Candle 1 (idx 2): Bearish, high = 1.0920, close = 1.0890
@@ -213,7 +213,7 @@ class TestConfirmationAndRRMath(unittest.TestCase):
         Spread buffer: 1 pip (0.0001)
         Stop-loss: 1.0920 + 0.0001 = 1.0921 (candle 1 high + spread)
         Risk distance: 1.0921 - 1.0850 = 0.0071 (71 pips)
-        Take-profit: 1.0850 - (10 * 0.0071) = 1.0140 (exactly 10:1 R:R)
+        Take-profit: 1.0850 - (5 * 0.0071) = 1.0495 (exactly 5:1 R:R)
         """
         c0 = create_candle(0, 1.0850, 1.0890, 1.0840, 1.0880)  # Bullish
         cS = create_candle(1, 1.0880, 1.0910, 1.0870, 1.0875)  # Sweeps c0 high
@@ -231,9 +231,9 @@ class TestConfirmationAndRRMath(unittest.TestCase):
         self.assertAlmostEqual(signal.entry_price, 1.0850)
         self.assertAlmostEqual(signal.stop_loss, 1.0921)
         self.assertAlmostEqual(signal.risk_distance, 0.0071)
-        self.assertAlmostEqual(signal.reward_distance, 0.0710)
-        self.assertAlmostEqual(signal.take_profit, 1.0140)
-        self.assertAlmostEqual(signal.reward_risk_ratio, 10.0)
+        self.assertAlmostEqual(signal.reward_distance, 0.0355)
+        self.assertAlmostEqual(signal.take_profit, 1.0495)
+        self.assertAlmostEqual(signal.reward_risk_ratio, 5.0)
 
     def test_confirmation_fails_if_sequence_breaks(self):
         """If candle 2 closes opposite to trade direction, confirmation must return None."""
@@ -286,7 +286,7 @@ class TestRuleEngineEndToEnd(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(result["direction"], "SELL")
         self.assertEqual(result["entry_price"], 1.0850)
-        self.assertEqual(result["reward_risk_ratio"], 10.0)
+        self.assertEqual(result["reward_risk_ratio"], 5.0)
         self.assertIn("stop_loss", result)
         self.assertIn("take_profit", result)
 

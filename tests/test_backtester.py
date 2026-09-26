@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKSPACE_ROOT) not in sys.path:
@@ -146,7 +147,7 @@ class TestDynamicLotSizing(unittest.TestCase):
 class TestBacktestEngineExecution(unittest.TestCase):
     """Test full event-driven trade execution and position lifecycle."""
 
-    def test_buy_trade_hits_10_to_1_take_profit(self):
+    def test_buy_trade_hits_5_to_1_take_profit(self):
         """
         Setup a complete BUY trade:
         Bar 0: Bullish
@@ -154,7 +155,7 @@ class TestBacktestEngineExecution(unittest.TestCase):
         Bar 2: C1 Bullish (low defines SL)
         Bar 3: C2 Bullish
         Bar 4: C3 Bullish (close is entry) -> Signal fires!
-        Bar 5: Rally hits Take Profit (+10R)
+        Bar 5: Rally hits Take Profit (+5R)
         """
         c0 = create_candle(0, 1.0880, 1.0890, 1.0820, 1.0830)  # Bearish, low=1.0820
         cS = create_candle(1, 1.0830, 1.0840, 1.0805, 1.0825)  # Sweeps c0 low (1.0820)
@@ -164,7 +165,7 @@ class TestBacktestEngineExecution(unittest.TestCase):
 
         # SL = c1.low = 1.0815
         # Risk = 1.0870 - 1.0815 = 0.0055 (55 pips)
-        # TP = 1.0870 + (10 * 0.0055) = 1.1420
+        # TP = 1.0870 + (5 * 0.0055) = 1.1145
         # Bar 5: massive upward move hitting TP
         c4 = create_candle(5, 1.0870, 1.1500, 1.0860, 1.1450)
 
@@ -182,7 +183,7 @@ class TestBacktestEngineExecution(unittest.TestCase):
         trade = result.trades[0]
         self.assertEqual(trade.direction, "BUY")
         self.assertEqual(trade.exit_reason, "TP")
-        self.assertEqual(trade.realized_r, 10.0)
+        self.assertEqual(trade.realized_r, 5.0)
         self.assertGreater(result.final_balance, result.initial_balance)
 
     def test_sell_trade_hits_stop_loss(self):
@@ -221,6 +222,40 @@ class TestBacktestEngineExecution(unittest.TestCase):
         self.assertEqual(trade.exit_reason, "SL")
         self.assertEqual(trade.realized_r, -1.0)
         self.assertLess(result.final_balance, result.initial_balance)
+
+    def test_multitimeframe_backtest_execution(self):
+        """
+        Verify multi-timeframe backtesting with M5 sweep detection and M1 3-candle confirmation.
+        """
+        base_t = datetime(2023, 1, 2, 8, 0, 0, tzinfo=timezone.utc)
+        # M5 candles:
+        # m5_0 (08:00 - 08:05): Bullish, high 1.0890
+        # m5_1 (08:05 - 08:10): Bearish, sweeps high with 1.0910, closes 1.0875
+        m5_0 = Candle(timestamp=base_t, open=1.0850, high=1.0890, low=1.0840, close=1.0880, volume=100.0)
+        m5_1 = Candle(timestamp=base_t + timedelta(minutes=5), open=1.0880, high=1.0910, low=1.0870, close=1.0875, volume=100.0)
+
+        # M1 candles (starting 08:10):
+        # 08:10: C1 Bearish
+        m1_0 = Candle(timestamp=base_t + timedelta(minutes=10), open=1.0875, high=1.0880, low=1.0868, close=1.0870, volume=10.0)
+        # 08:11: C2 Bearish
+        m1_1 = Candle(timestamp=base_t + timedelta(minutes=11), open=1.0870, high=1.0872, low=1.0858, close=1.0860, volume=10.0)
+        # 08:12: C3 Bearish -> Confirms Sell Signal at close 1.0850!
+        m1_2 = Candle(timestamp=base_t + timedelta(minutes=12), open=1.0860, high=1.0862, low=1.0848, close=1.0850, volume=10.0)
+        # 08:13: Price drops to 1.0500 -> Hits 5:1 Take Profit!
+        m1_3 = Candle(timestamp=base_t + timedelta(minutes=13), open=1.0850, high=1.0852, low=1.0500, close=1.0520, volume=50.0)
+
+        engine = BacktestEngine(BacktestConfig(initial_balance=10000.0, spread_pips=0.0, slippage_pips=0.0))
+        result = engine.run_multitimeframe(
+            m1_candles=[m1_0, m1_1, m1_2, m1_3],
+            m5_candles=[m5_0, m5_1],
+        )
+
+        self.assertEqual(result.total_trades, 1)
+        trade = result.trades[0]
+        self.assertEqual(trade.direction, "SELL")
+        self.assertEqual(trade.exit_reason, "TP")
+        self.assertEqual(trade.realized_r, 5.0)
+        self.assertGreater(result.final_balance, result.initial_balance)
 
 
 class TestPerformanceMetrics(unittest.TestCase):

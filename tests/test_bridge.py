@@ -173,14 +173,17 @@ class TestPositionSizer(unittest.TestCase):
         self.assertEqual(PositionSizer.get_pip_size("EURJPY"), Decimal("0.01"))
 
     def test_pip_value_usd(self) -> None:
-        # Quote currency USD: always $10.00 / lot
+        # Quote currency USD: always $10.00 / lot (including broker suffixes like EURUSDm)
         self.assertEqual(self.sizer.get_pip_value_usd("EURUSD"), Decimal("10.00"))
+        self.assertEqual(self.sizer.get_pip_value_usd("EURUSDm"), Decimal("10.00"))
         self.assertEqual(self.sizer.get_pip_value_usd("GBPUSD"), Decimal("10.00"))
 
         # Base currency USD: (100,000 * 0.01) / 150.00 = 6.67
         rates = {"USDJPY": Decimal("150.00")}
         pip_val_jpy = self.sizer.get_pip_value_usd("USDJPY", rates=rates)
         self.assertEqual(pip_val_jpy, Decimal("6.67"))
+        pip_val_jpym = self.sizer.get_pip_value_usd("USDJPYm", rates=rates)
+        self.assertEqual(pip_val_jpym, Decimal("6.67"))
 
     def test_calculate_lots_eurusd(self) -> None:
         # Balance = $10,000, Risk = 1.5% ($150)
@@ -259,7 +262,7 @@ class TestBridgeExecutor(unittest.TestCase):
 
     def test_step_triggers_order_on_strategy_signal(self) -> None:
         t0 = datetime(2026, 9, 24, 0, 0, tzinfo=timezone.utc)
-        candles: List[Candle] = []
+        candles: list[Candle] = []
 
         # 1. 20 base candles
         for i in range(20):
@@ -359,14 +362,63 @@ class TestBridgeExecutor(unittest.TestCase):
         self.assertEqual(record.entry_price, Decimal("1.0885"))
         self.assertEqual(record.sl_price, Decimal("1.0830"))  # c1.low
 
-        # 10:1 R:R verification
+        # 1:5 R:R verification
         risk = record.entry_price - record.sl_price
         reward = record.tp_price - record.entry_price
-        self.assertEqual(reward, risk * Decimal("10"))
+        self.assertEqual(reward, risk * Decimal("5"))
 
         # Step again on same data -> verify idempotency (no duplicate order)
         second_record = self.executor.step()
         self.assertIsNone(second_record)
+
+    def test_step_multitimeframe_execution(self) -> None:
+        """
+        Verify BridgeExecutor.step_multitimeframe with M5 sweep detection and M1 3-candle confirmation.
+        """
+        t0 = datetime(2023, 9, 24, 8, 0, 0, tzinfo=timezone.utc)
+        # M5 candles
+        m5_0 = Candle(timestamp=t0, open=1.0850, high=1.0890, low=1.0840, close=1.0880, volume=100.0)
+        m5_1 = Candle(timestamp=t0 + timedelta(minutes=5), open=1.0880, high=1.0910, low=1.0870, close=1.0875, volume=100.0)
+        self.client.write_mock_bars("EURUSD", "M5", [m5_0, m5_1])
+
+        # Step 1: Initial M1 bar to initialize last_processed_m1_time
+        m1_init = Candle(timestamp=t0 + timedelta(minutes=9), open=1.0878, high=1.0882, low=1.0875, close=1.0876, volume=10.0)
+        self.client.write_mock_bars("EURUSD", "M1", [m1_init])
+        self.executor.step_multitimeframe()
+
+        # Step 2: Feed confirming M1 bars (08:10, 08:11, 08:12)
+        m1_0 = Candle(timestamp=t0 + timedelta(minutes=10), open=1.0875, high=1.0880, low=1.0868, close=1.0870, volume=10.0)
+        m1_1 = Candle(timestamp=t0 + timedelta(minutes=11), open=1.0870, high=1.0872, low=1.0858, close=1.0860, volume=10.0)
+        m1_2 = Candle(timestamp=t0 + timedelta(minutes=12), open=1.0860, high=1.0862, low=1.0848, close=1.0850, volume=10.0)
+        self.client.write_mock_bars("EURUSD", "M1", [m1_init, m1_0, m1_1, m1_2])
+
+        # Pre-populate mock execution report
+        expected_magic = generate_mt4_magic_number(m1_2.timestamp, sequence=1)
+        mock_report = ExecutionReport(
+            ticket=554433,
+            magic=expected_magic,
+            symbol="EURUSD",
+            order_type=OrderType.SELL,
+            lots=Decimal("0.50"),
+            open_price=Decimal("1.08500"),
+            sl=Decimal("1.08800"),
+            tp=Decimal("1.05500"),
+            status="FILLED",
+        )
+        self.client.write_mock_report(mock_report)
+
+        record = self.executor.step_multitimeframe()
+        self.assertIsNotNone(record)
+        self.assertEqual(record.status, "FILLED")
+        self.assertEqual(record.ticket, 554433)
+        self.assertEqual(record.direction, Direction.SELL)
+        self.assertEqual(record.entry_price, Decimal("1.0850"))
+        self.assertEqual(record.sl_price, Decimal("1.0880"))
+
+        # Verify 1:5 R:R
+        risk = record.sl_price - record.entry_price
+        reward = record.entry_price - record.tp_price
+        self.assertEqual(reward, risk * Decimal("5"))
 
 
 if __name__ == "__main__":

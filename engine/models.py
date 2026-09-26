@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class Direction(str, Enum):
@@ -124,6 +124,39 @@ class SweepEvent:
     extreme_price: float  # The highest high or lowest low reached during the sweep
 
 
+@dataclass
+class ArmedState:
+    """
+    Represents the active 'armed' state after a higher-timeframe liquidity sweep.
+    While armed, the system watches the 1-minute chart for 3 consecutive confirming candles.
+    """
+    direction: Direction
+    sweep_timeframe: str  # "M5" or "M15"
+    sweep_candle: Candle
+    swept_level: float
+    extreme_price: float
+    armed_at_timestamp: datetime
+    candles_watched: int = 0
+    max_watch_candles: int = 15  # As confirmed by user
+    confirming_candles: List[Candle] = field(default_factory=list)
+
+    @property
+    def is_expired(self) -> bool:
+        return self.candles_watched >= self.max_watch_candles
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "direction": self.direction.value if isinstance(self.direction, Direction) else str(self.direction),
+            "sweep_timeframe": self.sweep_timeframe,
+            "swept_level": self.swept_level,
+            "extreme_price": self.extreme_price,
+            "armed_at_timestamp": self.armed_at_timestamp.isoformat() if self.armed_at_timestamp else None,
+            "candles_watched": self.candles_watched,
+            "max_watch_candles": self.max_watch_candles,
+            "confirming_count": len(self.confirming_candles),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class TradeSignal:
     """
@@ -135,11 +168,13 @@ class TradeSignal:
     take_profit: float
     risk_distance: float
     reward_distance: float
-    reward_risk_ratio: float = 10.0
+    reward_risk_ratio: float = 5.0
     sweep_type: str = ""
     sweep_candle_index: int = -1
     confirmation_indices: Tuple[int, int, int] = field(default_factory=tuple)  # Indices of the 3 confirmation candles
     timestamp: Optional[datetime] = None
+    sweep_timeframe: str = "M5"
+    timeframe: str = "M1"
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -157,4 +192,6 @@ class TradeSignal:
             "sweep_candle_index": self.sweep_candle_index,
             "confirmation_indices": list(self.confirmation_indices),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "sweep_timeframe": self.sweep_timeframe,
+            "timeframe": self.timeframe,
         }

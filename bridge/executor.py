@@ -13,16 +13,30 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable, Dict, List, Optional, Set
 
 from bridge.dwx_client import DWXClient, ExecutionReport, OrderType, TradeCommand
 from bridge.sizing import PositionSizer, SizingResult
+from bridge.watchdog import BridgeWatchdog
+from database.sqlite_manager import TradingDatabase
 from engine.models import Candle, Direction, TradeSignal
 from engine.rule_engine import RuleEngine
+from risk.guardrails import RiskGuardrails
+from risk.models import AccountState, ValidationResult
 
 logger = logging.getLogger("executor")
+
+TIMEFRAME_DELTAS: Dict[str, timedelta] = {
+    "M1": timedelta(minutes=1),
+    "M5": timedelta(minutes=5),
+    "M15": timedelta(minutes=15),
+    "M30": timedelta(minutes=30),
+    "H1": timedelta(hours=1),
+    "H4": timedelta(hours=4),
+    "D1": timedelta(days=1),
+}
 
 
 def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
@@ -68,6 +82,9 @@ class BridgeExecutor:
         dwx_client: DWXClient,
         rule_engine: Optional[RuleEngine] = None,
         position_sizer: Optional[PositionSizer] = None,
+        risk_guardrails: Optional[RiskGuardrails] = None,
+        watchdog: Optional[BridgeWatchdog] = None,
+        db: Optional[TradingDatabase] = None,
         timeframe: str = "M5",
         initial_balance: Decimal = Decimal("10000.00"),
         risk_pct: Decimal = Decimal("0.015"),
@@ -76,9 +93,10 @@ class BridgeExecutor:
         on_signal_callback: Optional[Callable[[TradeSignal], None]] = None,
         on_order_callback: Optional[Callable[[BridgeOrderRecord], None]] = None,
     ) -> None:
-        self.symbol = symbol.replace("/", "").upper()
+        self.symbol = symbol.strip().replace("/", "")
         self.dwx_client = dwx_client
         self.timeframe = timeframe.upper()
+        self.timeframe_delta = TIMEFRAME_DELTAS.get(self.timeframe, timedelta(minutes=5))
         self.balance = initial_balance
         self.risk_pct = risk_pct
         self.confirmation_timeout_sec = confirmation_timeout_sec
@@ -87,6 +105,9 @@ class BridgeExecutor:
         # Core Rule Engine (strictly shared between backtester & live bridge)
         self.rule_engine = rule_engine or RuleEngine(swing_lookback=20)
         self.position_sizer = position_sizer or PositionSizer(default_risk_pct=risk_pct)
+        self.risk_guardrails = risk_guardrails  # None = guardrails not wired (legacy/test mode)
+        self.watchdog = watchdog
+        self.db = db
 
         # Callbacks
         self.on_signal_callback = on_signal_callback
@@ -95,10 +116,92 @@ class BridgeExecutor:
         # State tracking
         self.candle_history: List[Candle] = []
         self.last_processed_bar_time: Optional[datetime] = None
+        self.last_processed_m1_time: Optional[datetime] = None
+        self.last_processed_m5_time: Optional[datetime] = None
+        self.last_processed_m15_time: Optional[datetime] = None
         self.processed_signal_keys: Set[str] = set()
         self.order_records: List[BridgeOrderRecord] = []
         self._running = False
         self._magic_seq = 0
+
+    def step_multitimeframe(
+        self,
+        m1_timeframe: str = "M1",
+        m5_timeframe: str = "M5",
+        m15_timeframe: str = "M15",
+    ) -> Optional[BridgeOrderRecord]:
+        """
+        Multi-timeframe execution cycle (Phase 1 & 3 Specification):
+        1. Reads M5 and M15 closed bars from MT4 exports and feeds to RuleEngine.on_htf_candle.
+        2. Reads M1 closed bars from MT4 export and feeds to RuleEngine.on_m1_candle.
+        3. If 3 consecutive confirming 1m candles complete, calculates dynamic position size,
+           evaluates non-bypassable risk guardrails, logs to database, and executes market order via DWXClient.
+        """
+        # 1. Process M15 bars (if present)
+        m15_bars = self.dwx_client.read_closed_bars(self.symbol, m15_timeframe)
+        if m15_bars:
+            if self.last_processed_m15_time is None:
+                new_m15 = m15_bars
+            else:
+                new_m15 = [c for c in m15_bars if c.timestamp > self.last_processed_m15_time]
+            for bar in new_m15:
+                self.last_processed_m15_time = bar.timestamp
+                self.rule_engine.on_htf_candle(bar, timeframe="M15")
+                if self.db is not None:
+                    try:
+                        self.db.save_candles([bar], self.symbol, "M15")
+                    except Exception as e:
+                        logger.error(f"Failed to save M15 candle to DB: {e}")
+
+        # 2. Process M5 bars (if present)
+        m5_bars = self.dwx_client.read_closed_bars(self.symbol, m5_timeframe)
+        if m5_bars:
+            if self.last_processed_m5_time is None:
+                new_m5 = m5_bars
+            else:
+                new_m5 = [c for c in m5_bars if c.timestamp > self.last_processed_m5_time]
+            for bar in new_m5:
+                self.last_processed_m5_time = bar.timestamp
+                self.rule_engine.on_htf_candle(bar, timeframe="M5")
+                if self.db is not None:
+                    try:
+                        self.db.save_candles([bar], self.symbol, "M5")
+                    except Exception as e:
+                        logger.error(f"Failed to save M5 candle to DB: {e}")
+
+        # 3. Process M1 bars
+        m1_bars = self.dwx_client.read_closed_bars(self.symbol, m1_timeframe)
+        if not m1_bars:
+            return None
+
+        if self.db is not None:
+            try:
+                self.db.save_candles(m1_bars, self.symbol, "M1")
+            except Exception as e:
+                logger.error(f"Failed to save M1 candles to DB: {e}")
+
+        if self.watchdog is not None:
+            m1_delta = TIMEFRAME_DELTAS.get("M1", timedelta(minutes=1))
+            self.watchdog.record_bar_received(m1_bars[-1].timestamp + m1_delta)
+
+        if self.last_processed_m1_time is None:
+            self.last_processed_m1_time = m1_bars[-1].timestamp
+            return None
+
+        new_m1 = [c for c in m1_bars if c.timestamp > self.last_processed_m1_time]
+        if not new_m1:
+            return None
+
+        dispatched_record: Optional[BridgeOrderRecord] = None
+        for bar in new_m1:
+            self.last_processed_m1_time = bar.timestamp
+            signal = self.rule_engine.on_m1_candle(bar)
+            if signal is not None:
+                record = self._execute_signal(signal)
+                if record is not None:
+                    dispatched_record = record
+
+        return dispatched_record
 
     def step(self) -> Optional[BridgeOrderRecord]:
         """Performs a single execution cycle:
@@ -113,6 +216,17 @@ class BridgeExecutor:
         closed_bars = self.dwx_client.read_closed_bars(self.symbol, self.timeframe)
         if not closed_bars:
             return None
+
+        if self.db is not None:
+            try:
+                self.db.save_candles(closed_bars, self.symbol, self.timeframe)
+            except Exception as e:
+                logger.error(f"Failed to persist closed candles to DB: {e}")
+
+        if self.watchdog is not None:
+            # Bar timestamp is the candle open time; candle closes at open + timeframe_delta
+            bar_close_time = closed_bars[-1].timestamp + self.timeframe_delta
+            self.watchdog.record_bar_received(bar_close_time)
 
         dispatched_record: Optional[BridgeOrderRecord] = None
 
@@ -176,6 +290,17 @@ class BridgeExecutor:
 
         if not sizing.is_valid:
             logger.warning(f"Order rejected by position sizer: {sizing.rejection_reason}")
+            if self.db is not None:
+                try:
+                    self.db.save_signal(
+                        signal=signal,
+                        symbol=self.symbol,
+                        timeframe=self.timeframe,
+                        executed=False,
+                        rejection_reason=f"PositionSizer: {sizing.rejection_reason}",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to log rejected signal to DB: {e}")
             record = BridgeOrderRecord(
                 magic=0,
                 signal_id=signal_key,
@@ -196,11 +321,91 @@ class BridgeExecutor:
                 self.on_order_callback(record)
             return record
 
+        # ── Non-Bypassable Risk Guardrail Gate ──────────────────────────
+        # If RiskGuardrails are wired, this is the MANDATORY checkpoint.
+        # A rejected trade NEVER reaches DWX dispatch.
+        if self.risk_guardrails is not None:
+            account_state = AccountState(
+                starting_daily_balance=self.balance,
+                current_balance=self.balance,
+                current_equity=self.balance,  # updated by live feed in production
+                realized_daily_pnl=Decimal("0.00"),
+                unrealized_daily_pnl=Decimal("0.00"),
+                open_trade_count=len([r for r in self.order_records if r.status == "FILLED"]),
+                daily_trades_count=len([r for r in self.order_records if r.status in ("FILLED", "UNCONFIRMED")]),
+                current_spread_pips=Decimal("0.0"),  # populated by live feed in production
+                timestamp=signal_time,
+            )
+            risk_result: ValidationResult = self.risk_guardrails.validate_trade(
+                account_state=account_state,
+                proposed_lots=sizing.lots,
+                trade_time=signal_time,
+            )
+            if not risk_result.is_allowed:
+                logger.warning(f"RISK REJECTION [{risk_result.reason}]: {risk_result.message}")
+                if self.db is not None:
+                    try:
+                        self.db.save_signal(
+                            signal=signal,
+                            symbol=self.symbol,
+                            timeframe=self.timeframe,
+                            executed=False,
+                            rejection_reason=f"RISK: [{risk_result.reason}] {risk_result.message}",
+                        )
+                        self.db.log_audit_event(
+                            event_type="TRADE_REJECTED",
+                            source="RiskGuardrails",
+                            details=f"[{risk_result.reason}] {risk_result.message}",
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to log risk rejection to DB: {e}")
+                record = BridgeOrderRecord(
+                    magic=0,
+                    signal_id=signal_key,
+                    symbol=self.symbol,
+                    direction=signal_dir,
+                    lots=sizing.lots,
+                    entry_price=entry_dec,
+                    sl_price=sl_dec,
+                    tp_price=tp_dec,
+                    risk_pips=stop_pips,
+                    reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
+                    dispatched_at=datetime.now(timezone.utc),
+                    status="REJECTED",
+                    rejection_reason=f"RISK: [{risk_result.reason}] {risk_result.message}",
+                )
+                self.order_records.append(record)
+                if self.on_order_callback:
+                    self.on_order_callback(record)
+                return record
+
         # Generate MT4 magic number
         self._magic_seq += 1
         magic = generate_mt4_magic_number(signal_time, self._magic_seq)
 
         order_type = OrderType.BUY if signal_dir == Direction.BUY else OrderType.SELL
+
+        if self.db is not None:
+            try:
+                self.db.save_signal(
+                    signal=signal,
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    executed=True,
+                )
+                self.db.save_order(
+                    command_id=f"CMD_{magic}_{self.symbol}",
+                    magic_number=magic,
+                    symbol=self.symbol,
+                    direction=signal_dir.value,
+                    lots=float(sizing.lots),
+                    target_entry=float(entry_dec),
+                    stop_loss=float(sl_dec),
+                    take_profit=float(tp_dec),
+                    status="SUBMITTED",
+                )
+            except Exception as e:
+                logger.error(f"Failed to save signal/order to DB: {e}")
 
         record = BridgeOrderRecord(
             magic=magic,
@@ -229,10 +434,23 @@ class BridgeExecutor:
                 magic=magic,
                 comment="akstack_10R",
             )
+            if self.watchdog is not None:
+                self.watchdog.record_order_dispatched()
         except Exception as e:
             logger.error(f"Failed to dispatch order to DWX: {e}")
             record.status = "ERROR"
             record.rejection_reason = str(e)
+            if self.db is not None:
+                try:
+                    self.db.update_order_fill(
+                        magic_number=magic,
+                        ticket=0,
+                        fill_price=0.0,
+                        status="ERROR",
+                    )
+                    self.db.log_audit_event("ORDER_ERROR", "executor", f"Magic {magic}: {e}")
+                except Exception as dbe:
+                    logger.error(f"Failed to update error in DB: {dbe}")
             if self.on_order_callback:
                 self.on_order_callback(record)
             return record
@@ -250,14 +468,61 @@ class BridgeExecutor:
                 record.fill_price = report.open_price
                 record.confirmed_at = report.timestamp
                 logger.info(f"Order FILLED: Ticket {record.ticket} at {record.fill_price}")
+                if self.db is not None and record.ticket is not None:
+                    try:
+                        slippage = float(abs(report.open_price - entry_dec) / Decimal("0.0001"))
+                        self.db.update_order_fill(
+                            magic_number=magic,
+                            ticket=record.ticket,
+                            fill_price=float(report.open_price),
+                            slippage_pips=slippage,
+                            status="FILLED",
+                        )
+                        self.db.log_audit_event(
+                            event_type="ORDER_FILLED",
+                            source="executor",
+                            details=f"Ticket {record.ticket}, Magic {magic}, Price {report.open_price}",
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to record fill in DB: {e}")
             else:
                 record.status = "REJECTED"
                 record.rejection_reason = f"{report.message} (error code {report.error_code})"
                 logger.warning(f"Order REJECTED by MT4: {record.rejection_reason}")
+                if self.db is not None:
+                    try:
+                        self.db.update_order_fill(
+                            magic_number=magic,
+                            ticket=0,
+                            fill_price=0.0,
+                            status="REJECTED",
+                        )
+                        self.db.log_audit_event(
+                            event_type="ORDER_REJECTED",
+                            source="MT4",
+                            details=f"Magic {magic}: {record.rejection_reason}",
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to record rejection in DB: {e}")
         else:
             record.status = "UNCONFIRMED"
             record.rejection_reason = f"Timeout ({self.confirmation_timeout_sec}s) waiting for ticket confirmation."
             logger.critical(f"Order UNCONFIRMED for magic {magic}! Check MT4 manually.")
+            if self.db is not None:
+                try:
+                    self.db.update_order_fill(
+                        magic_number=magic,
+                        ticket=0,
+                        fill_price=0.0,
+                        status="UNCONFIRMED",
+                    )
+                    self.db.log_audit_event(
+                        event_type="ORDER_UNCONFIRMED",
+                        source="executor",
+                        details=f"Magic {magic}: Timeout waiting for ticket confirmation",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to record unconfirmed in DB: {e}")
 
         if self.on_order_callback:
             self.on_order_callback(record)
@@ -269,11 +534,24 @@ class BridgeExecutor:
         self._running = True
         logger.info(f"Starting BridgeExecutor for {self.symbol} {self.timeframe}...")
         cycles = 0
+        last_watchdog_log = 0.0
 
         try:
             while self._running:
                 self.step()
                 cycles += 1
+
+                now_mono = time.monotonic()
+                if self.watchdog is not None and (now_mono - last_watchdog_log >= 30.0):
+                    last_watchdog_log = now_mono
+                    status = self.watchdog.check_health()
+                    logger.info(
+                        f"[WATCHDOG] State: {status.state.value} | "
+                        f"Bars: {status.bars_processed} | "
+                        f"Orders: {status.orders_dispatched} | "
+                        f"{status.status_message}"
+                    )
+
                 if max_cycles is not None and cycles >= max_cycles:
                     break
                 time.sleep(poll_interval_sec)
@@ -286,3 +564,99 @@ class BridgeExecutor:
     def stop(self) -> None:
         """Signals the bridge loop to stop gracefully."""
         self._running = False
+
+
+def main() -> None:
+    """Production entrypoint for running the AK Forex Trading Bridge."""
+    import sys
+    from config import load_config
+    from integrations.alerts import AlertDispatcher
+    from risk.models import RiskLimits
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    try:
+        cfg = load_config()
+    except Exception as e:
+        logger.critical(f"Failed to load configuration: {e}")
+        sys.exit(1)
+
+    print("=" * 70)
+    print("  AK FOREX TRADING SYSTEM — MT4 EXECUTION BRIDGE")
+    print(f"  Symbol:            {cfg.symbol}")
+    print(f"  Timeframe:         {cfg.timeframe}")
+    print(f"  Balance:           ${cfg.initial_balance:,.2f}")
+    print(f"  Risk / Trade:      {cfg.risk_pct * Decimal('100'):.1f}%")
+    print(f"  Max Daily Loss:    {cfg.max_daily_loss_pct * Decimal('100'):.1f}%")
+    print(f"  Max Daily Trades:  {cfg.max_daily_trades if cfg.max_daily_trades is not None else 'Unlimited (No limit)'}")
+    print(f"  Spread Ceiling:    {cfg.max_spread_pips} pips")
+    print(f"  Session Filter:    {cfg.session_start_hour:02d}:00 - {cfg.session_end_hour:02d}:00 UTC (London + NY + Overlap)")
+    print(f"  MT4 Files Folder:  {cfg.mt4_files_dir}")
+    db = TradingDatabase(cfg.db_path) if cfg.db_enabled else None
+    if db is not None:
+        logger.info(f"Connected to SQLite database at {cfg.db_path}")
+        print(f"  Database:          SQLite ({cfg.db_path})")
+        db.log_audit_event(
+            event_type="BRIDGE_STARTED",
+            source="executor",
+            details=f"Symbol: {cfg.symbol}, Timeframe: {cfg.timeframe}, Initial Balance: ${cfg.initial_balance}",
+        )
+    else:
+        print("  Database:          Disabled")
+    print("=" * 70)
+
+    dwx = DWXClient(cfg.mt4_files_dir)
+    alerts = AlertDispatcher(
+        telegram_token=cfg.telegram_token,
+        telegram_chat_id=cfg.telegram_chat_id,
+        webhook_url=cfg.webhook_url,
+    )
+    guardrail_cb = alerts.create_guardrail_callback()
+    watchdog_cb = alerts.create_watchdog_callback()
+
+    limits = RiskLimits(
+        max_daily_loss_pct=cfg.max_daily_loss_pct,
+        max_open_trades=cfg.max_open_trades,
+        max_daily_trades=cfg.max_daily_trades,
+        max_spread_pips=cfg.max_spread_pips,
+        session_start_hour_utc=cfg.session_start_hour,
+        session_end_hour_utc=cfg.session_end_hour,
+        session_filter_enabled=cfg.session_filter_enabled,
+        emergency_halt=cfg.emergency_halt,
+    )
+    guardrails = RiskGuardrails(limits=limits, alert_callback=guardrail_cb)
+    watchdog = BridgeWatchdog(
+        dwx_client=dwx,
+        risk_guardrails=guardrails,
+        max_heartbeat_age_sec=cfg.max_heartbeat_age_sec,
+        alert_callback=watchdog_cb,
+    )
+    sizer = PositionSizer(default_risk_pct=cfg.risk_pct)
+
+    bridge = BridgeExecutor(
+        symbol=cfg.symbol,
+        dwx_client=dwx,
+        position_sizer=sizer,
+        risk_guardrails=guardrails,
+        watchdog=watchdog,
+        db=db,
+        timeframe=cfg.timeframe,
+        initial_balance=cfg.initial_balance,
+        risk_pct=cfg.risk_pct,
+        confirmation_timeout_sec=cfg.confirmation_timeout_sec,
+    )
+
+    alerts.dispatch(
+        title="Bridge Started",
+        body=f"AK Forex Trading Bridge initialized on {cfg.symbol} {cfg.timeframe}.",
+    )
+
+    bridge.run(poll_interval_sec=1.0)
+
+
+if __name__ == "__main__":
+    main()

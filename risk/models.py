@@ -35,12 +35,12 @@ class RiskLimits:
     """Configurable system risk limits and safety bounds."""
     max_daily_loss_pct: Decimal = Decimal("0.03")  # 3.0% maximum daily loss
     max_open_trades: int = 1                       # Maximum concurrent open trades
-    max_daily_trades: int = 3                      # Maximum total trades allowed per calendar day
+    max_daily_trades: Optional[int] = None         # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")      # Maximum allowed spread ceiling in pips
     close_all_on_daily_limit_breach: bool = False  # False = let SL protect, True = close immediately
     session_start_hour_utc: int = 7                # 07:00 UTC (London session open)
-    session_end_hour_utc: int = 17                 # 17:00 UTC (NY afternoon close)
-    session_filter_enabled: bool = True            # Enforce London/NY session window
+    session_end_hour_utc: int = 21                 # 21:00 UTC (NY evening close)
+    session_filter_enabled: bool = True            # Enforce London, Overlap & NY session window (07:00 - 21:00 UTC)
     emergency_halt: bool = False                   # Global kill switch
 
 
