@@ -307,5 +307,105 @@ class TestRuleEngineEndToEnd(unittest.TestCase):
         self.assertEqual(signals[0].direction, "BUY")
 
 
+class TestC1WickSwapStrategy(unittest.TestCase):
+    """
+    Unit tests for the C1 Wick-Swap strategy:
+    - M5/M15 candle-to-candle wick sweep (Variant A).
+    - 3-consecutive M1 candle confirmation.
+    - Stop Loss strictly anchored to Candle 1 (C1 low for BUY, C1 high for SELL).
+    - 1:5 Reward-to-Risk ratio.
+    - Breakeven advance at +2.0R with no partial close (100% position runs to +5.0R).
+    """
+
+    def test_preset_configuration(self):
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD")
+        self.assertTrue(engine.use_c1_only_sl)
+        self.assertFalse(engine.use_sweep_wick_sl)
+        self.assertFalse(engine.anchor_to_key_liquidity)
+        self.assertTrue(engine.allow_variant_a)
+        self.assertFalse(engine.allow_variant_b)
+        self.assertEqual(engine.reward_risk_ratio, 5.0)
+        self.assertEqual(engine.breakeven_trigger_r, 2.0)
+        self.assertEqual(engine.partial_bank_pct, 0.0)
+        self.assertTrue(engine.h1_trend_filter)
+
+    def test_c1_wickswap_buy_setup(self):
+        t0 = datetime(2026, 10, 5, 8, 0, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, h1_trend_filter=False)
+
+        # M5 bar 0: Bearish
+        m5_0 = Candle(timestamp=t0, open=1.0880, high=1.0890, low=1.0840, close=1.0850)
+        engine.on_htf_candle(m5_0, timeframe="M5")
+
+        # M5 bar 1: Bullish sweeping bar 0 low (low 1.0830 < 1.0840, close 1.0860 >= 1.0840)
+        m5_1 = Candle(timestamp=t0 + timedelta(minutes=5), open=1.0845, high=1.0880, low=1.0830, close=1.0860)
+        armed = engine.on_htf_candle(m5_1, timeframe="M5")
+        self.assertIsNotNone(armed)
+        self.assertEqual(armed.direction, Direction.BUY)
+
+        # 3 confirming M1 bullish candles after M5 close (>= 08:10)
+        m1_0 = Candle(timestamp=t0 + timedelta(minutes=10), open=1.0855, high=1.0865, low=1.0850, close=1.0862)
+        m1_1 = Candle(timestamp=t0 + timedelta(minutes=11), open=1.0862, high=1.0875, low=1.0858, close=1.0870)
+        m1_2 = Candle(timestamp=t0 + timedelta(minutes=12), open=1.0870, high=1.0885, low=1.0868, close=1.0880)
+
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+        self.assertIsNone(engine.on_m1_candle(m1_1))
+        signal = engine.on_m1_candle(m1_2)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.direction, "BUY")
+        self.assertEqual(signal.entry_price, 1.0880)
+
+        # SL strictly below C1 low minus buffer (1.0850 - 0.00005 = 1.08495)
+        expected_sl = 1.0850 - (0.5 * 0.0001)
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # 1:5 Reward-to-Risk ratio
+        risk = signal.entry_price - signal.stop_loss
+        expected_tp = signal.entry_price + (5.0 * risk)
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+        self.assertEqual(signal.breakeven_trigger_r, 2.0)
+        self.assertEqual(signal.partial_bank_pct, 0.0)
+
+    def test_c1_wickswap_sell_setup(self):
+        t0 = datetime(2026, 10, 5, 8, 0, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, h1_trend_filter=False)
+
+        # M5 bar 0: Bullish
+        m5_0 = Candle(timestamp=t0, open=1.0850, high=1.0890, low=1.0840, close=1.0880)
+        engine.on_htf_candle(m5_0, timeframe="M5")
+
+        # M5 bar 1: Bearish sweeping bar 0 high (high 1.0905 > 1.0890, close 1.0875 <= 1.0890)
+        m5_1 = Candle(timestamp=t0 + timedelta(minutes=5), open=1.0885, high=1.0905, low=1.0870, close=1.0875)
+        armed = engine.on_htf_candle(m5_1, timeframe="M5")
+        self.assertIsNotNone(armed)
+        self.assertEqual(armed.direction, Direction.SELL)
+
+        # 3 confirming M1 bearish candles after M5 close (>= 08:10)
+        m1_0 = Candle(timestamp=t0 + timedelta(minutes=10), open=1.0875, high=1.0880, low=1.0865, close=1.0868)
+        m1_1 = Candle(timestamp=t0 + timedelta(minutes=11), open=1.0868, high=1.0870, low=1.0855, close=1.0858)
+        m1_2 = Candle(timestamp=t0 + timedelta(minutes=12), open=1.0858, high=1.0860, low=1.0845, close=1.0848)
+
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+        self.assertIsNone(engine.on_m1_candle(m1_1))
+        signal = engine.on_m1_candle(m1_2)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.0848)
+
+        # SL strictly top of C1 high plus spread & buffer (1.0880 + 0.00005 + 0.00005 = 1.08810)
+        expected_sl = 1.0880 + (0.5 * 0.0001) + (0.5 * 0.0001)
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # 1:5 Reward-to-Risk ratio
+        risk = signal.stop_loss - signal.entry_price
+        expected_tp = signal.entry_price - (5.0 * risk)
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

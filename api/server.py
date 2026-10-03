@@ -273,6 +273,7 @@ class BridgeController:
                 from bridge.dwx_client import DWXClient
                 from bridge.sizing import PositionSizer
                 from bridge.executor import BridgeExecutor
+                from engine.rule_engine import RuleEngine
                 from risk.models import RiskLimits
                 from risk.guardrails import RiskGuardrails
                 from bridge.watchdog import BridgeWatchdog
@@ -356,6 +357,7 @@ class BridgeController:
                     b = BridgeExecutor(
                         symbol=sym,
                         dwx_client=dwx,
+                        rule_engine=RuleEngine.institutional_preset(symbol=sym),
                         position_sizer=sizer,
                         risk_guardrails=guardrails,
                         watchdog=watchdog,
@@ -1082,6 +1084,13 @@ def start_api_server(host: str = "127.0.0.1", port: int = 8642) -> None:
 
     server = create_api_server(host, port, controller, event_bus, db_path)
     logger.info(f"API Server listening on http://{host}:{port}")
+
+    # Auto-start bridge on server startup
+    try:
+        controller.start()
+        logger.info("Auto-started BridgeController on server startup.")
+    except Exception as e:
+        logger.warning(f"Bridge auto-start warning: {e}")
 
     # Check and auto-launch MetaTrader 4 terminal if not running
     try:

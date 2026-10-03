@@ -26,12 +26,24 @@ def evaluate_3_candles(
     confirmation_indices: Tuple[int, int, int] = (0, 1, 2),
     use_c1_only_sl: bool = False,
     reward_risk_ratio: float = 5.0,
+    sweep_extreme_price: Optional[float] = None,
+    use_sweep_wick_sl: bool = False,
+    min_displacement_ratio: float = 0.0,
+    avg_candle_body: Optional[float] = None,
+    min_risk_pips: float = 0.0,
+    partial_bank_r: Optional[float] = None,
+    partial_bank_pct: Optional[float] = None,
+    breakeven_trigger_r: Optional[float] = None,
 ) -> Optional[TradeSignal]:
     """
     Evaluates 3 closed candles for directional confirmation and calculates R:R (default 5:1).
-    - Long (BUY): All 3 candles must be bullish. Stop-loss at lowest low across all 3 candles.
-    - Short (SELL): All 3 candles must be bearish. Stop-loss at highest high across all 3 candles (+ spread).
+    - Long (BUY): All 3 candles must be bullish.
+    - Short (SELL): All 3 candles must be bearish.
     - Entry: Close of 3rd candle.
+    - Stop-Loss:
+      - If use_sweep_wick_sl=True: Placed beyond the sweep extreme wick (High_sweep + spread for short, Low_sweep for long).
+      - Else: lowest low / highest high across confirming candles (default).
+    - Displacement: If min_displacement_ratio > 0, requires at least one candle body >= ratio * avg_candle_body.
     - Take-Profit: Entry ± (reward_risk_ratio * Stop Distance).
     """
     if len(confirming_candles) != 3:
@@ -41,13 +53,29 @@ def evaluate_3_candles(
     buffer_price = buffer_pips * pip_size
     spread_price = spread_pips * pip_size
 
+    # Check institutional displacement requirement if configured
+    if min_displacement_ratio > 0.0 and avg_candle_body is not None and avg_candle_body > 0.0:
+        max_body = max(c1.body, c2.body, c3.body)
+        if max_body < (min_displacement_ratio * avg_candle_body):
+            return None
+
     if direction == Direction.BUY:
         if not (c1.is_bullish and c2.is_bullish and c3.is_bullish):
             return None
         entry_price = c3.close
-        lowest_low = c1.low if use_c1_only_sl else min(c1.low, c2.low, c3.low)
-        stop_loss = lowest_low - buffer_price
+        if use_sweep_wick_sl and sweep_extreme_price is not None:
+            stop_loss = sweep_extreme_price - buffer_price
+        else:
+            lowest_low = c1.low if use_c1_only_sl else min(c1.low, c2.low, c3.low)
+            stop_loss = lowest_low - buffer_price
+
         risk_distance = entry_price - stop_loss
+        if min_risk_pips > 0.0:
+            min_dist = min_risk_pips * pip_size
+            if risk_distance < min_dist:
+                risk_distance = min_dist
+                stop_loss = entry_price - risk_distance
+
         if risk_distance <= 0:
             return None
         reward_distance = reward_risk_ratio * risk_distance
@@ -67,15 +95,29 @@ def evaluate_3_candles(
             timestamp=c3.timestamp,
             sweep_timeframe=sweep_timeframe,
             timeframe="M1",
+            extreme_price=sweep_extreme_price,
+            partial_bank_r=partial_bank_r,
+            partial_bank_pct=partial_bank_pct,
+            breakeven_trigger_r=breakeven_trigger_r,
         )
 
     elif direction == Direction.SELL:
         if not (c1.is_bearish and c2.is_bearish and c3.is_bearish):
             return None
         entry_price = c3.close
-        highest_high = c1.high if use_c1_only_sl else max(c1.high, c2.high, c3.high)
-        stop_loss = highest_high + spread_price + buffer_price
+        if use_sweep_wick_sl and sweep_extreme_price is not None:
+            stop_loss = sweep_extreme_price + spread_price + buffer_price
+        else:
+            highest_high = c1.high if use_c1_only_sl else max(c1.high, c2.high, c3.high)
+            stop_loss = highest_high + spread_price + buffer_price
+
         risk_distance = stop_loss - entry_price
+        if min_risk_pips > 0.0:
+            min_dist = min_risk_pips * pip_size
+            if risk_distance < min_dist:
+                risk_distance = min_dist
+                stop_loss = entry_price + risk_distance
+
         if risk_distance <= 0:
             return None
         reward_distance = reward_risk_ratio * risk_distance
@@ -95,6 +137,10 @@ def evaluate_3_candles(
             timestamp=c3.timestamp,
             sweep_timeframe=sweep_timeframe,
             timeframe="M1",
+            extreme_price=sweep_extreme_price,
+            partial_bank_r=partial_bank_r,
+            partial_bank_pct=partial_bank_pct,
+            breakeven_trigger_r=breakeven_trigger_r,
         )
 
     return None
@@ -108,6 +154,13 @@ def evaluate_confirmation(
     spread_pips: float = 0.0,
     use_c1_only_sl: bool = False,
     reward_risk_ratio: float = 5.0,
+    use_sweep_wick_sl: bool = False,
+    min_displacement_ratio: float = 0.0,
+    avg_candle_body: Optional[float] = None,
+    min_risk_pips: float = 0.0,
+    partial_bank_r: Optional[float] = None,
+    partial_bank_pct: Optional[float] = None,
+    breakeven_trigger_r: Optional[float] = None,
 ) -> Optional[TradeSignal]:
     """
     Evaluate the 3 candles immediately following the sweep candle.
@@ -142,5 +195,13 @@ def evaluate_confirmation(
         confirmation_indices=(c1_idx, c2_idx, c3_idx),
         use_c1_only_sl=use_c1_only_sl,
         reward_risk_ratio=reward_risk_ratio,
+        sweep_extreme_price=sweep_event.extreme_price,
+        use_sweep_wick_sl=use_sweep_wick_sl,
+        min_displacement_ratio=min_displacement_ratio,
+        avg_candle_body=avg_candle_body,
+        min_risk_pips=min_risk_pips,
+        partial_bank_r=partial_bank_r,
+        partial_bank_pct=partial_bank_pct,
+        breakeven_trigger_r=breakeven_trigger_r,
     )
 

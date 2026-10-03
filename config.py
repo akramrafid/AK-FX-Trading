@@ -29,7 +29,20 @@ def parse_simple_env_file(filepath: Path) -> Dict[str, str]:
             if "=" in stripped:
                 k, v = stripped.split("=", 1)
                 k = k.strip()
-                v = v.strip().strip("'\"")
+                # Strip inline comment if value is unquoted or after quotes
+                if "#" in v:
+                    # If value starts with quote, only strip after closing quote
+                    if v.startswith(('"', "'")):
+                        q = v[0]
+                        end_q = v.find(q, 1)
+                        if end_q != -1:
+                            v = v[1:end_q]
+                        else:
+                            v = v.split("#")[0].strip().strip("'\"")
+                    else:
+                        v = v.split("#")[0].strip().strip("'\"")
+                else:
+                    v = v.strip().strip("'\"")
                 env_vars[k] = v
     return env_vars
 
@@ -43,11 +56,12 @@ class AppConfig:
     # Market Strategy
     symbol: str = "EURUSD"
     timeframe: str = "M5"
+    strategy_mode: str = "c1_wickswap"  # "c1_wickswap" (test strategy) or "institutional"
     initial_balance: Decimal = Decimal("10000.00")
     risk_pct: Decimal = Decimal("0.015")  # 1.5%
 
     # Risk Guardrails
-    max_daily_loss_pct: Decimal = Decimal("0.03")  # 3.0%
+    max_daily_loss_pct: Optional[Decimal] = Decimal("0.03")  # None = unlimited / disabled
     max_open_trades: int = 1
     max_daily_trades: Optional[int] = None  # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")
@@ -73,8 +87,9 @@ class AppConfig:
         self.mt4_files_dir = Path(self.mt4_files_dir).resolve()
         if self.risk_pct <= 0 or self.risk_pct > Decimal("0.05"):
             raise ValueError(f"Risk % must be between 0.001 and 0.05 (got: {self.risk_pct})")
-        if self.max_daily_loss_pct <= 0 or self.max_daily_loss_pct > Decimal("0.10"):
-            raise ValueError(f"Daily loss limit must be between 0.01 and 0.10 (got: {self.max_daily_loss_pct})")
+        if self.max_daily_loss_pct is not None:
+            if self.max_daily_loss_pct <= 0 or self.max_daily_loss_pct > Decimal("0.10"):
+                raise ValueError(f"Daily loss limit must be between 0.01 and 0.10 (got: {self.max_daily_loss_pct})")
         if self.max_open_trades < 1:
             raise ValueError("Max open trades must be >= 1")
         if self.max_daily_trades is not None and self.max_daily_trades < 1:
@@ -106,13 +121,19 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
     if raw_max_trades and raw_max_trades.strip().lower() not in ("0", "none", "unlimited", "null", ""):
         max_daily_trades_val = int(raw_max_trades)
 
+    raw_max_loss = get_var("MAX_DAILY_LOSS_PCT", "0.03")
+    max_daily_loss_pct_val: Optional[Decimal] = None
+    if raw_max_loss and raw_max_loss.strip().lower() not in ("0", "0.0", "none", "unlimited", "null", ""):
+        max_daily_loss_pct_val = Decimal(raw_max_loss)
+
     return AppConfig(
         mt4_files_dir=mt4_dir,
         symbol=get_var("TRADING_SYMBOL", "EURUSD").strip().replace("/", ""),
         timeframe=get_var("TRADING_TIMEFRAME", "M5").upper(),
+        strategy_mode=get_var("STRATEGY_MODE", "c1_wickswap").strip().lower(),
         initial_balance=Decimal(get_var("ACCOUNT_INITIAL_BALANCE", "10000.00")),
         risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.015")),
-        max_daily_loss_pct=Decimal(get_var("MAX_DAILY_LOSS_PCT", "0.03")),
+        max_daily_loss_pct=max_daily_loss_pct_val,
         max_open_trades=int(get_var("MAX_OPEN_TRADES", "1")),
         max_daily_trades=max_daily_trades_val,
         max_spread_pips=Decimal(get_var("MAX_SPREAD_PIPS", "2.5")),

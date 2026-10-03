@@ -201,3 +201,64 @@ def detect_sweep(
             return event
 
     return None
+
+
+def detect_key_liquidity_sweep(
+    candle: Candle,
+    asia_high: Optional[float] = None,
+    asia_low: Optional[float] = None,
+    pdh: Optional[float] = None,
+    pdl: Optional[float] = None,
+    min_sweep_dist: float = 0.0,
+    candle_index: int = -1,
+) -> Optional[SweepEvent]:
+    """
+    Detect liquidity sweeps of key institutional external liquidity pools:
+    - Asian Session High / Low (00:00 - 07:00 UTC)
+    - Previous Day High / Low (PDH / PDL)
+
+    A valid institutional sweep requires:
+    1. Wick penetrates beyond the key level by at least min_sweep_dist (e.g. >= 2.0 pips).
+    2. Candle body rejects and closes back inside the level.
+    """
+    # 1. Check Bullish Sweeps of Lows (seeking BUY)
+    swept_level = None
+    sweep_type_name = None
+
+    if asia_low is not None and candle.low < (asia_low - min_sweep_dist) and candle.close >= asia_low:
+        swept_level = asia_low
+        sweep_type_name = SweepType.ASIAN_RANGE
+    elif pdl is not None and candle.low < (pdl - min_sweep_dist) and candle.close >= pdl:
+        swept_level = pdl
+        sweep_type_name = SweepType.PREV_DAY
+
+    if swept_level is not None and sweep_type_name is not None:
+        return SweepEvent(
+            sweep_type=sweep_type_name,
+            direction=Direction.BUY,
+            candle_index=candle_index,
+            sweep_candle=candle,
+            swept_level=swept_level,
+            extreme_price=candle.low,
+        )
+
+    # 2. Check Bearish Sweeps of Highs (seeking SELL)
+    if asia_high is not None and candle.high > (asia_high + min_sweep_dist) and candle.close <= asia_high:
+        swept_level = asia_high
+        sweep_type_name = SweepType.ASIAN_RANGE
+    elif pdh is not None and candle.high > (pdh + min_sweep_dist) and candle.close <= pdh:
+        swept_level = pdh
+        sweep_type_name = SweepType.PREV_DAY
+
+    if swept_level is not None and sweep_type_name is not None:
+        return SweepEvent(
+            sweep_type=sweep_type_name,
+            direction=Direction.SELL,
+            candle_index=candle_index,
+            sweep_candle=candle,
+            swept_level=swept_level,
+            extreme_price=candle.high,
+        )
+
+    return None
+

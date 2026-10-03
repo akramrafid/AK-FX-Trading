@@ -80,7 +80,7 @@ class RiskGuardrails:
             return res
 
         # 2. Daily Loss Limit Check (Realized + Unrealized)
-        if account_state.is_daily_loss_exceeded(self.limits.max_daily_loss_pct):
+        if self.limits.max_daily_loss_pct is not None and account_state.is_daily_loss_exceeded(self.limits.max_daily_loss_pct):
             loss_pct_display = (account_state.daily_loss_pct * Decimal("100")).quantize(Decimal("0.1"))
             limit_pct_display = (self.limits.max_daily_loss_pct * Decimal("100")).quantize(Decimal("0.1"))
             msg = (

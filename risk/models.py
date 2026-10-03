@@ -33,7 +33,7 @@ class TradeRejectionReason(str, Enum):
 @dataclass(frozen=True)
 class RiskLimits:
     """Configurable system risk limits and safety bounds."""
-    max_daily_loss_pct: Decimal = Decimal("0.03")  # 3.0% maximum daily loss
+    max_daily_loss_pct: Optional[Decimal] = Decimal("0.03")  # None = disabled
     max_open_trades: int = 1                       # Maximum concurrent open trades
     max_daily_trades: Optional[int] = None         # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")      # Maximum allowed spread ceiling in pips
@@ -72,8 +72,10 @@ class AccountState:
             return Decimal("0.0")
         return abs(self.total_daily_pnl) / self.starting_daily_balance
 
-    def is_daily_loss_exceeded(self, max_daily_loss_pct: Decimal) -> bool:
+    def is_daily_loss_exceeded(self, max_daily_loss_pct: Optional[Decimal]) -> bool:
         """True if total daily losses exceed the allowed percentage threshold."""
+        if max_daily_loss_pct is None:
+            return False
         return self.daily_loss_pct >= max_daily_loss_pct
 
 

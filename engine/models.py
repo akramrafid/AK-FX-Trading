@@ -20,6 +20,9 @@ class SweepType(str, Enum):
     """Liquidity sweep setup variant."""
     VARIANT_A = "VARIANT_A"  # Candle-to-candle immediate preceding candle sweep
     VARIANT_B = "VARIANT_B"  # Swing-level multi-bar swing high/low sweep
+    ASIAN_RANGE = "ASIAN_RANGE"  # Sweep of Asian Session (00:00-07:00 UTC) High/Low
+    PREV_DAY = "PREV_DAY"  # Sweep of Previous Day High/Low (PDH/PDL)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,12 +178,16 @@ class TradeSignal:
     timestamp: Optional[datetime] = None
     sweep_timeframe: str = "M5"
     timeframe: str = "M1"
+    extreme_price: Optional[float] = None
+    partial_bank_r: Optional[float] = None
+    partial_bank_pct: Optional[float] = None
+    breakeven_trigger_r: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """
         Returns the clean output dictionary specified in system requirements.
         """
-        return {
+        data = {
             "direction": self.direction,
             "entry_price": round(self.entry_price, 5),
             "stop_loss": round(self.stop_loss, 5),
@@ -195,3 +202,12 @@ class TradeSignal:
             "sweep_timeframe": self.sweep_timeframe,
             "timeframe": self.timeframe,
         }
+        if self.extreme_price is not None:
+            data["extreme_price"] = round(self.extreme_price, 5)
+        if self.partial_bank_r is not None:
+            data["partial_bank_r"] = round(self.partial_bank_r, 2)
+        if self.partial_bank_pct is not None:
+            data["partial_bank_pct"] = round(self.partial_bank_pct, 2)
+        if self.breakeven_trigger_r is not None:
+            data["breakeven_trigger_r"] = round(self.breakeven_trigger_r, 2)
+        return data

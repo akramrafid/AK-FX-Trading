@@ -10,11 +10,12 @@ Connects:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import Callable, Dict, List, Optional, Set
 
 from bridge.dwx_client import DWXClient, ExecutionReport, OrderType, TradeCommand
@@ -49,6 +50,23 @@ def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
     """
     base = (dt.month * 10_000_000) + (dt.day * 100_000) + (dt.hour * 1000) + (dt.minute * 10) + (sequence % 10)
     return int(base % 2_000_000_000)
+
+
+@dataclass
+class ActiveBridgeTrade:
+    """Tracks active MT4 position for live trade management (Pillar 5)."""
+    ticket: int
+    magic: int
+    symbol: str
+    direction: Direction
+    entry_price: Decimal
+    sl_price: Decimal
+    tp_price: Decimal
+    lots: Decimal
+    risk_pips: Decimal
+    partial_banked: bool = False
+    breakeven_set: bool = False
+    partial_bank_pct: Optional[Decimal] = Decimal("0.70")
 
 
 @dataclass
@@ -121,8 +139,69 @@ class BridgeExecutor:
         self.last_processed_m15_time: Optional[datetime] = None
         self.processed_signal_keys: Set[str] = set()
         self.order_records: List[BridgeOrderRecord] = []
+        self.active_trades: Dict[int, ActiveBridgeTrade] = {}
         self._running = False
         self._magic_seq = 0
+
+    def _manage_active_trades(self, current_bar: Candle) -> None:
+        """Applies Institutional Pillar 5 dynamic trade management to active MT4 positions:
+        - Milestone 1: At +2.0R, bank 70% partial profits via send_close.
+        - Milestone 2: At +2.0R, move SL to breakeven (+0.5 pip buffer) via send_modify.
+        """
+        if not self.active_trades:
+            return
+
+        pip_size = PositionSizer.get_pip_size(self.symbol)
+        for ticket, trade in list(self.active_trades.items()):
+            if trade.direction == Direction.BUY:
+                favorable_price = Decimal(str(current_bar.high))
+                cur_r = (favorable_price - trade.entry_price) / (trade.risk_pips * pip_size) if trade.risk_pips > 0 else Decimal("0")
+            else:
+                favorable_price = Decimal(str(current_bar.low))
+                cur_r = (trade.entry_price - favorable_price) / (trade.risk_pips * pip_size) if trade.risk_pips > 0 else Decimal("0")
+
+            if cur_r >= Decimal("2.0"):
+                # Milestone 1: Bank partial profits if configured (> 0)
+                if not trade.partial_banked and trade.partial_bank_pct and trade.partial_bank_pct > Decimal("0"):
+                    close_lots = (trade.lots * trade.partial_bank_pct).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                    if close_lots >= Decimal("0.01"):
+                        try:
+                            self.dwx_client.send_close(ticket=ticket, lots=close_lots, symbol=self.symbol)
+                            trade.partial_banked = True
+                            trade.lots -= close_lots
+                            logger.info(
+                                f"[{self.symbol}] Milestone 1: Banked {trade.partial_bank_pct * Decimal('100'):.0f}% partial ({close_lots} lots) "
+                                f"on ticket {ticket} at +2.0R (reached {cur_r:.2f}R)"
+                            )
+                            if self.db is not None:
+                                self.db.log_audit_event(
+                                    "PARTIAL_CLOSE",
+                                    "executor",
+                                    f"Ticket {ticket}: closed {close_lots} lots at +2.0R",
+                                )
+                        except Exception as e:
+                            logger.error(f"Failed to send partial close for ticket {ticket}: {e}")
+
+                # Milestone 2: Advance Stop Loss to Breakeven (+ 0.5 pip buffer)
+                if not trade.breakeven_set:
+                    buffer = Decimal("0.00005") if "JPY" not in self.symbol.upper() else Decimal("0.005")
+                    new_sl = (trade.entry_price + buffer) if trade.direction == Direction.BUY else (trade.entry_price - buffer)
+                    try:
+                        self.dwx_client.send_modify(ticket=ticket, sl=new_sl, tp=trade.tp_price, symbol=self.symbol)
+                        trade.breakeven_set = True
+                        trade.sl_price = new_sl
+                        logger.info(
+                            f"[{self.symbol}] Milestone 2: Moved SL to Breakeven ({new_sl}) "
+                            f"on ticket {ticket} at +2.0R"
+                        )
+                        if self.db is not None:
+                            self.db.log_audit_event(
+                                "BREAKEVEN_ADVANCE",
+                                "executor",
+                                f"Ticket {ticket}: SL moved to {new_sl}",
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to advance SL to breakeven for ticket {ticket}: {e}")
 
     def step_multitimeframe(
         self,
@@ -195,6 +274,7 @@ class BridgeExecutor:
         dispatched_record: Optional[BridgeOrderRecord] = None
         for bar in new_m1:
             self.last_processed_m1_time = bar.timestamp
+            self._manage_active_trades(bar)
             signal = self.rule_engine.on_m1_candle(bar)
             if signal is not None:
                 record = self._execute_signal(signal)
@@ -213,6 +293,11 @@ class BridgeExecutor:
         
         Returns BridgeOrderRecord if a trade was dispatched, else None.
         """
+        # If M1 bars file is exported by MT4, route to multi-timeframe streaming engine
+        m1_file = self.dwx_client.get_bars_file(self.symbol, "M1")
+        if m1_file.exists():
+            return self.step_multitimeframe()
+
         closed_bars = self.dwx_client.read_closed_bars(self.symbol, self.timeframe)
         if not closed_bars:
             return None
@@ -248,6 +333,7 @@ class BridgeExecutor:
         for bar in new_bars:
             self.last_processed_bar_time = bar.timestamp
             self.candle_history.append(bar)
+            self._manage_active_trades(bar)
             if len(self.candle_history) >= 5:
                 signal = self.rule_engine.evaluate_completed_candle(self.candle_history)
                 if signal is not None:
@@ -468,6 +554,20 @@ class BridgeExecutor:
                 record.fill_price = report.open_price
                 record.confirmed_at = report.timestamp
                 logger.info(f"Order FILLED: Ticket {record.ticket} at {record.fill_price}")
+                if report.ticket is not None:
+                    p_pct = Decimal(str(signal.partial_bank_pct)) if (signal.partial_bank_pct is not None) else Decimal("0.0")
+                    self.active_trades[report.ticket] = ActiveBridgeTrade(
+                        ticket=report.ticket,
+                        magic=magic,
+                        symbol=self.symbol,
+                        direction=signal_dir,
+                        entry_price=report.open_price,
+                        sl_price=sl_dec,
+                        tp_price=tp_dec,
+                        lots=sizing.lots,
+                        risk_pips=stop_pips,
+                        partial_bank_pct=p_pct,
+                    )
                 if self.db is not None and record.ticket is not None:
                     try:
                         slippage = float(abs(report.open_price - entry_dec) / Decimal("0.0001"))
@@ -637,25 +737,73 @@ def main() -> None:
     )
     sizer = PositionSizer(default_risk_pct=cfg.risk_pct)
 
-    bridge = BridgeExecutor(
-        symbol=cfg.symbol,
-        dwx_client=dwx,
-        position_sizer=sizer,
-        risk_guardrails=guardrails,
-        watchdog=watchdog,
-        db=db,
-        timeframe=cfg.timeframe,
-        initial_balance=cfg.initial_balance,
-        risk_pct=cfg.risk_pct,
-        confirmation_timeout_sec=cfg.confirmation_timeout_sec,
-    )
+    symbols = [s.strip() for s in cfg.symbol.split(",") if s.strip()]
+    if not symbols:
+        symbols = ["EURUSDm"]
+
+    # Read live balance from DWX_Account.txt if present
+    live_bal = cfg.initial_balance
+    acc_file = dwx.files_dir / "DWX_Account.txt"
+    if acc_file.exists():
+        try:
+            acc_data = json.loads(acc_file.read_text(encoding="utf-8", errors="ignore"))
+            if "balance" in acc_data and float(acc_data["balance"]) > 0:
+                live_bal = Decimal(str(acc_data["balance"]))
+                print(f"  Live Balance:      ${live_bal:,.2f} (from MT4 account {acc_data.get('account_number', '')})")
+        except Exception:
+            pass
+
+    bridges: List[BridgeExecutor] = []
+    is_c1_mode = getattr(cfg, "strategy_mode", "c1_wickswap").lower() == "c1_wickswap"
+    preset_name = "C1 Wick-Swap (1:5 R:R, BE @ 2R, C1 SL)" if is_c1_mode else "Institutional Preset"
+
+    for sym in symbols:
+        engine = (
+            RuleEngine.c1_wickswap_preset(symbol=sym)
+            if is_c1_mode
+            else RuleEngine.institutional_preset(symbol=sym)
+        )
+        b = BridgeExecutor(
+            symbol=sym,
+            dwx_client=dwx,
+            rule_engine=engine,
+            position_sizer=sizer,
+            risk_guardrails=guardrails,
+            watchdog=watchdog,
+            db=db,
+            timeframe=cfg.timeframe,
+            initial_balance=live_bal,
+            risk_pct=cfg.risk_pct,
+            confirmation_timeout_sec=cfg.confirmation_timeout_sec,
+        )
+        bridges.append(b)
 
     alerts.dispatch(
         title="Bridge Started",
-        body=f"AK Forex Trading Bridge initialized on {cfg.symbol} {cfg.timeframe}.",
+        body=f"AK Forex Trading Bridge initialized on {', '.join(symbols)} {cfg.timeframe} ({preset_name}).",
     )
 
-    bridge.run(poll_interval_sec=1.0)
+    print(f"\n[INFO] Starting bridge loop for symbols: {', '.join(symbols)} ({preset_name})")
+    print("[INFO] Polling MT4 files folder every 1.0s... (Press Ctrl+C to stop)\n")
+
+    try:
+        last_watchdog_log = 0.0
+        while True:
+            for b in bridges:
+                b.step()
+            now_mono = time.monotonic()
+            if watchdog is not None and (now_mono - last_watchdog_log >= 30.0):
+                last_watchdog_log = now_mono
+                status = watchdog.check_health()
+                logger.info(
+                    f"[WATCHDOG] State: {status.state.value} | "
+                    f"Bars: {status.bars_processed} | "
+                    f"Orders: {sum(len(b.order_records) for b in bridges)} | "
+                    f"{status.status_message}"
+                )
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        logger.info("BridgeExecutor stopped by user.")
 
 
 if __name__ == "__main__":

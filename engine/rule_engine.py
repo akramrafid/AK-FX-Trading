@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .models import ArmedState, Candle, Direction, SweepEvent, SweepType, TradeSignal
-from .sweep_detector import detect_sweep, detect_variant_a, detect_variant_b
+from .sweep_detector import detect_sweep, detect_variant_a, detect_variant_b, detect_key_liquidity_sweep
 from .confirmation import evaluate_confirmation, evaluate_3_candles
 
 
@@ -94,14 +94,32 @@ class RuleEngine:
         max_watch_candles: int = 15,
         disarm_on_break: bool = True,
         reward_risk_ratio: float = 5.0,
+        # Institutional Enhancements (Pillars 1 - 5)
+        anchor_to_key_liquidity: bool = False,
+        min_sweep_pips: float = 0.0,
+        use_sweep_wick_sl: bool = False,
+        use_c1_only_sl: bool = False,
+        min_displacement_ratio: float = 0.0,
+        h1_trend_filter: bool = False,
+        session_filter: bool = False,
+        session_start_hour: int = 7,
+        session_end_hour: int = 21,
+        symbol: str = "EURUSD",
+        partial_bank_r: Optional[float] = None,
+        partial_bank_pct: Optional[float] = None,
+        breakeven_trigger_r: Optional[float] = None,
     ) -> None:
+        self.symbol = symbol
         self.allow_variant_a = allow_variant_a
         self.allow_variant_b = allow_variant_b
         self.swing_lookback = swing_lookback
         self.swing_strength = swing_strength
         self.buffer_pips = buffer_pips
         self.spread_pips = spread_pips
-        self.pip_size = pip_size
+        if "JPY" in symbol.upper():
+            self.pip_size = 0.01
+        else:
+            self.pip_size = pip_size
         self.min_risk_pips = min_risk_pips
         self.check_m5 = check_m5
         self.check_m15 = check_m15
@@ -109,10 +127,177 @@ class RuleEngine:
         self.disarm_on_break = disarm_on_break
         self.reward_risk_ratio = reward_risk_ratio
 
+        # Institutional & Strategy configuration
+        self.anchor_to_key_liquidity = anchor_to_key_liquidity
+        self.min_sweep_pips = min_sweep_pips
+        self.use_sweep_wick_sl = use_sweep_wick_sl
+        self.use_c1_only_sl = use_c1_only_sl
+        self.min_displacement_ratio = min_displacement_ratio
+        self.h1_trend_filter = h1_trend_filter
+        self.session_filter = session_filter
+        self.session_start_hour = session_start_hour
+        self.session_end_hour = session_end_hour
+        self.partial_bank_r = partial_bank_r
+        self.partial_bank_pct = partial_bank_pct
+        self.breakeven_trigger_r = breakeven_trigger_r
+
         # State tracking for multi-timeframe streaming
         self.armed_state: Optional[ArmedState] = None
         self._htf_history: Dict[str, List[Candle]] = {"M5": [], "M15": []}
         self._m1_history: List[Candle] = []
+
+        # Session & Key Levels (Asian Session 00:00-07:00 UTC & Previous Day High/Low)
+        self.asia_high: Optional[float] = None
+        self.asia_low: Optional[float] = None
+        self.pdh: Optional[float] = None
+        self.pdl: Optional[float] = None
+        self._current_day = None
+        self._day_high: Optional[float] = None
+        self._day_low: Optional[float] = None
+
+        # Rolling M1 body metrics for displacement confirmation
+        self._m1_body_sum: float = 0.0
+        self._m1_body_count: int = 0
+
+        # H1 aggregation & running 50 EMA
+        self._curr_h1_key: Optional[datetime] = None
+        self._curr_h1_buf: List[Candle] = []
+        self._h1_candles: List[Candle] = []
+        self._h1_closes: List[float] = []
+        self.latest_h1_ema: Optional[float] = None
+
+    @classmethod
+    def institutional_preset(
+        cls,
+        symbol: str = "EURUSD",
+        anchor_to_key_liquidity: bool = True,
+        use_sweep_wick_sl: bool = True,
+        min_sweep_pips: float = 2.0,
+        min_risk_pips: float = 6.0,
+        min_displacement_ratio: float = 1.2,
+        h1_trend_filter: bool = True,
+        reward_risk_ratio: float = 5.0,
+        partial_bank_r: float = 2.0,
+        partial_bank_pct: float = 0.70,
+        breakeven_trigger_r: float = 2.0,
+        session_filter: bool = True,
+        session_start_hour: int = 7,
+        session_end_hour: int = 21,
+        **kwargs,
+    ) -> RuleEngine:
+        """
+        Factory constructor implementing the 5 institutional pillars:
+        1. Key liquidity pool sweeps (Asian Range & PDH/PDL with >= 2.0 pip penetration).
+        2. True invalidation Stop-Loss anchored at HTF sweep extreme wick (+ spread/buffer).
+        3. M1 displacement confirmation (at least one candle body >= 1.2x average M1 body).
+        4. Higher timeframe trend alignment (H1 50 EMA filter).
+        5. Dynamic trade management (bank 70% at +2.0R, move SL to breakeven, runner to +5.0R).
+        """
+        return cls(
+            symbol=symbol,
+            anchor_to_key_liquidity=anchor_to_key_liquidity,
+            use_sweep_wick_sl=use_sweep_wick_sl,
+            min_sweep_pips=min_sweep_pips,
+            min_risk_pips=min_risk_pips,
+            min_displacement_ratio=min_displacement_ratio,
+            h1_trend_filter=h1_trend_filter,
+            reward_risk_ratio=reward_risk_ratio,
+            partial_bank_r=partial_bank_r,
+            partial_bank_pct=partial_bank_pct,
+            breakeven_trigger_r=breakeven_trigger_r,
+            session_filter=session_filter,
+            session_start_hour=session_start_hour,
+            session_end_hour=session_end_hour,
+            **kwargs,
+        )
+
+    @classmethod
+    def c1_wickswap_preset(
+        cls,
+        symbol: str = "EURUSD",
+        allow_variant_a: bool = True,
+        allow_variant_b: bool = False,
+        anchor_to_key_liquidity: bool = False,
+        use_sweep_wick_sl: bool = False,
+        use_c1_only_sl: bool = True,
+        min_sweep_pips: float = 0.0,
+        min_risk_pips: float = 1.0,
+        min_displacement_ratio: float = 0.0,
+        h1_trend_filter: bool = True,
+        reward_risk_ratio: float = 5.0,
+        partial_bank_r: Optional[float] = None,
+        partial_bank_pct: Optional[float] = 0.0,
+        breakeven_trigger_r: float = 2.0,
+        session_filter: bool = True,
+        session_start_hour: int = 7,
+        session_end_hour: int = 21,
+        buffer_pips: float = 0.5,
+        spread_pips: float = 0.5,
+        **kwargs,
+    ) -> RuleEngine:
+        """
+        Factory constructor for C1 Wick-Swap strategy:
+        - M5/M15 candle-to-candle wick sweep (Variant A).
+        - 1-minute 3-consecutive directional candle confirmation.
+        - Stop-Loss anchored strictly to Candle 1 (below low for Buy, top of high for Sell + spread/buffer).
+        - Fixed 1:5 Reward-to-Risk ratio.
+        - Breakeven: At +2.0R, move SL to entry (no partial close, 100% position runs to +5.0R).
+        - Higher timeframe trend alignment (H1 50 EMA filter).
+        """
+        return cls(
+            symbol=symbol,
+            allow_variant_a=allow_variant_a,
+            allow_variant_b=allow_variant_b,
+            anchor_to_key_liquidity=anchor_to_key_liquidity,
+            use_sweep_wick_sl=use_sweep_wick_sl,
+            use_c1_only_sl=use_c1_only_sl,
+            min_sweep_pips=min_sweep_pips,
+            min_risk_pips=min_risk_pips,
+            min_displacement_ratio=min_displacement_ratio,
+            h1_trend_filter=h1_trend_filter,
+            reward_risk_ratio=reward_risk_ratio,
+            partial_bank_r=partial_bank_r,
+            partial_bank_pct=partial_bank_pct,
+            breakeven_trigger_r=breakeven_trigger_r,
+            session_filter=session_filter,
+            session_start_hour=session_start_hour,
+            session_end_hour=session_end_hour,
+            buffer_pips=buffer_pips,
+            spread_pips=spread_pips,
+            **kwargs,
+        )
+
+    def _update_daily_and_session_levels(self, candle: Candle) -> None:
+        """Update daily running high/low, PDH/PDL, and Asian Session high/low."""
+        dt = candle.timestamp
+        date = dt.date()
+        if self._current_day != date:
+            if self._current_day is not None:
+                self.pdh = self._day_high
+                self.pdl = self._day_low
+            self._current_day = date
+            self._day_high = candle.high
+            self._day_low = candle.low
+            self.asia_high = None
+            self.asia_low = None
+        else:
+            self._day_high = max(self._day_high, candle.high) if self._day_high is not None else candle.high
+            self._day_low = min(self._day_low, candle.low) if self._day_low is not None else candle.low
+
+        if 0 <= dt.hour < 7:
+            self.asia_high = candle.high if self.asia_high is None else max(self.asia_high, candle.high)
+            self.asia_low = candle.low if self.asia_low is None else min(self.asia_low, candle.low)
+
+    def on_h1_candle(self, raw_candle: Union[Candle, Dict[str, Any]]) -> None:
+        """Ingest closed H1 candle and update running 50 EMA."""
+        candle = raw_candle if isinstance(raw_candle, Candle) else Candle.from_dict(raw_candle)
+        self._h1_candles.append(candle)
+        self._h1_closes.append(candle.close)
+        if len(self._h1_closes) == 1:
+            self.latest_h1_ema = candle.close
+        else:
+            mult = 2.0 / (50 + 1)
+            self.latest_h1_ema = (candle.close - self.latest_h1_ema) * mult + self.latest_h1_ema
 
     @property
     def is_armed(self) -> bool:
@@ -151,6 +336,20 @@ class RuleEngine:
         self.disarm()
         self._htf_history = {"M5": [], "M15": []}
         self._m1_history = []
+        self.asia_high = None
+        self.asia_low = None
+        self.pdh = None
+        self.pdl = None
+        self._current_day = None
+        self._day_high = None
+        self._day_low = None
+        self._m1_body_sum = 0.0
+        self._m1_body_count = 0
+        self._curr_h1_key = None
+        self._curr_h1_buf = []
+        self._h1_candles = []
+        self._h1_closes = []
+        self.latest_h1_ema = None
 
     def _coerce_candles(self, raw_candles: Sequence[Union[Candle, Dict[str, Any]]]) -> List[Candle]:
         """Convert input sequence into a list of verified Candle objects."""
@@ -174,57 +373,82 @@ class RuleEngine:
         timeframe: str = "M5",
     ) -> Optional[ArmedState]:
         """
-        Ingest a closed higher-timeframe candle (5-min or 15-min).
+        Ingest a closed higher-timeframe candle (5-min, 15-min, or 1-hour).
         Evaluates whether a liquidity sweep occurred:
-        - Bullish sweep (seeking BUY): current candle is bullish, prior was bearish,
-          current wick extends below prior low, closes back at/above prior low.
-        - Bearish sweep (seeking SELL): current candle is bearish, prior was bullish,
-          current wick extends above prior high, closes back at/below prior high.
+        - Bullish sweep (seeking BUY): current candle is bullish, prior was bearish (or key low swept).
+        - Bearish sweep (seeking SELL): current candle is bearish, prior was bullish (or key high swept).
         If yes, arms the 1-minute confirmation watch state.
         """
         tf = timeframe.upper().strip()
         candle = raw_candle if isinstance(raw_candle, Candle) else Candle.from_dict(raw_candle)
-        history = self._htf_history.setdefault(tf, [])
+        self._update_daily_and_session_levels(candle)
 
-        if len(history) >= 1:
+        if tf in ("H1", "1H", "60"):
+            self.on_h1_candle(candle)
+            return None
+
+        history = self._htf_history.setdefault(tf, [])
+        in_session = True
+        if self.session_filter:
+            in_session = (self.session_start_hour <= candle.timestamp.hour < self.session_end_hour)
+
+        if len(history) >= 1 and in_session:
             prev = history[-1]
             sweep_event: Optional[SweepEvent] = None
 
-            # Check Variant A: Candle-to-Candle liquidity sweep of prior opposite candle
-            if self.allow_variant_a:
-                # Bullish sweep check
-                if prev.is_bearish and candle.is_bullish:
-                    if candle.low < prev.low and candle.close >= prev.low:
-                        sweep_event = SweepEvent(
-                            sweep_type=SweepType.VARIANT_A,
-                            direction=Direction.BUY,
-                            candle_index=len(history),
-                            sweep_candle=candle,
-                            swept_level=prev.low,
-                            extreme_price=candle.low,
-                        )
-                # Bearish sweep check
-                elif prev.is_bullish and candle.is_bearish:
-                    if candle.high > prev.high and candle.close <= prev.high:
-                        sweep_event = SweepEvent(
-                            sweep_type=SweepType.VARIANT_A,
-                            direction=Direction.SELL,
-                            candle_index=len(history),
-                            sweep_candle=candle,
-                            swept_level=prev.high,
-                            extreme_price=candle.high,
-                        )
-
-            # Check Variant B: Swing-level sweep if Variant A did not trigger
-            if sweep_event is None and self.allow_variant_b and len(history) >= (self.swing_strength * 2 + 1):
-                max_needed = self.swing_lookback + (self.swing_strength * 2) + 5
-                window = history[-max_needed:] + [candle]
-                sweep_event = detect_variant_b(
-                    window,
-                    current_idx=len(window) - 1,
-                    lookback=self.swing_lookback,
-                    swing_strength=self.swing_strength,
+            # Institutional Pillar 1: Key Liquidity Pools (Asian High/Low & PDH/PDL)
+            if self.anchor_to_key_liquidity:
+                min_dist = self.min_sweep_pips * self.pip_size
+                sweep_event = detect_key_liquidity_sweep(
+                    candle=candle,
+                    asia_high=self.asia_high,
+                    asia_low=self.asia_low,
+                    pdh=self.pdh,
+                    pdl=self.pdl,
+                    min_sweep_dist=min_dist,
+                    candle_index=len(history),
                 )
+            else:
+                # Standard Variant A: Candle-to-Candle liquidity sweep of prior opposite candle
+                if self.allow_variant_a:
+                    if prev.is_bearish and candle.is_bullish:
+                        if candle.low < prev.low and candle.close >= prev.low:
+                            sweep_event = SweepEvent(
+                                sweep_type=SweepType.VARIANT_A,
+                                direction=Direction.BUY,
+                                candle_index=len(history),
+                                sweep_candle=candle,
+                                swept_level=prev.low,
+                                extreme_price=candle.low,
+                            )
+                    elif prev.is_bullish and candle.is_bearish:
+                        if candle.high > prev.high and candle.close <= prev.high:
+                            sweep_event = SweepEvent(
+                                sweep_type=SweepType.VARIANT_A,
+                                direction=Direction.SELL,
+                                candle_index=len(history),
+                                sweep_candle=candle,
+                                swept_level=prev.high,
+                                extreme_price=candle.high,
+                            )
+
+                # Standard Variant B: Swing-level sweep if Variant A did not trigger
+                if sweep_event is None and self.allow_variant_b and len(history) >= (self.swing_strength * 2 + 1):
+                    max_needed = self.swing_lookback + (self.swing_strength * 2) + 5
+                    window = history[-max_needed:] + [candle]
+                    sweep_event = detect_variant_b(
+                        window,
+                        current_idx=len(window) - 1,
+                        lookback=self.swing_lookback,
+                        swing_strength=self.swing_strength,
+                    )
+
+            # Institutional Pillar 4: Higher-Timeframe Trend Filter (H1 50 EMA)
+            if sweep_event is not None and self.h1_trend_filter and self.latest_h1_ema is not None:
+                if sweep_event.direction == Direction.BUY and candle.close < self.latest_h1_ema:
+                    sweep_event = None
+                elif sweep_event.direction == Direction.SELL and candle.close > self.latest_h1_ema:
+                    sweep_event = None
 
             if sweep_event is not None:
                 self.arm(
@@ -233,7 +457,7 @@ class RuleEngine:
                     sweep_timeframe=tf,
                     swept_level=sweep_event.swept_level,
                     extreme_price=sweep_event.extreme_price,
-                    sweep_type=sweep_event.sweep_type.value,
+                    sweep_type=sweep_event.sweep_type.value if hasattr(sweep_event.sweep_type, "value") else str(sweep_event.sweep_type),
                 )
 
         history.append(candle)
@@ -250,9 +474,8 @@ class RuleEngine:
         If armed:
         - Evaluates consecutive same-direction candles (all bullish for BUY, all bearish for SELL).
         - If 3 consecutive candles complete:
-            entry = candle.close
-            stop_loss = highest high (Sell) or lowest low (Buy) across all 3 candles (+ spread/buffer)
-            take_profit = entry ± (10 * stop_distance)
+            evaluates confirmation (with displacement check if configured).
+            sets stop-loss (at sweep wick extreme if use_sweep_wick_sl=True).
             disarms and returns TradeSignal.
         - If a candle breaks the required direction before 3 form:
             disarms immediately (or resets streak if disarm_on_break=False).
@@ -263,6 +486,34 @@ class RuleEngine:
         self._m1_history.append(candle)
         if len(self._m1_history) > 100:
             del self._m1_history[:-100]
+
+        # Update M1 body metrics for displacement
+        self._m1_body_sum += candle.body
+        self._m1_body_count += 1
+
+        # Keep daily & session levels updated
+        self._update_daily_and_session_levels(candle)
+
+        # Update H1 aggregation
+        h1_t = candle.timestamp.replace(minute=0, second=0, microsecond=0)
+        if self._curr_h1_key is None:
+            self._curr_h1_key = h1_t
+            self._curr_h1_buf = [candle]
+        elif h1_t == self._curr_h1_key:
+            self._curr_h1_buf.append(candle)
+        else:
+            if self._curr_h1_buf:
+                h1_bar = Candle(
+                    timestamp=self._curr_h1_key,
+                    open=self._curr_h1_buf[0].open,
+                    high=max(b.high for b in self._curr_h1_buf),
+                    low=min(b.low for b in self._curr_h1_buf),
+                    close=self._curr_h1_buf[-1].close,
+                    volume=sum(b.volume for b in self._curr_h1_buf),
+                )
+                self.on_h1_candle(h1_bar)
+            self._curr_h1_key = h1_t
+            self._curr_h1_buf = [candle]
 
         if self.armed_state is None:
             return None
@@ -285,6 +536,7 @@ class RuleEngine:
             self.armed_state.confirming_candles.append(candle)
             if len(self.armed_state.confirming_candles) == 3:
                 # 3 consecutive confirming candles complete
+                avg_m1_body = (self._m1_body_sum / self._m1_body_count) if self._m1_body_count > 0 else None
                 signal = evaluate_3_candles(
                     confirming_candles=self.armed_state.confirming_candles,
                     direction=self.armed_state.direction,
@@ -294,6 +546,15 @@ class RuleEngine:
                     sweep_type="SWEEP_" + self.armed_state.sweep_timeframe,
                     sweep_timeframe=self.armed_state.sweep_timeframe,
                     reward_risk_ratio=self.reward_risk_ratio,
+                    sweep_extreme_price=self.armed_state.extreme_price,
+                    use_sweep_wick_sl=self.use_sweep_wick_sl,
+                    use_c1_only_sl=self.use_c1_only_sl,
+                    min_displacement_ratio=self.min_displacement_ratio,
+                    avg_candle_body=avg_m1_body,
+                    min_risk_pips=self.min_risk_pips,
+                    partial_bank_r=self.partial_bank_r,
+                    partial_bank_pct=self.partial_bank_pct,
+                    breakeven_trigger_r=self.breakeven_trigger_r,
                 )
                 self.disarm()
                 if signal is not None:
@@ -323,11 +584,14 @@ class RuleEngine:
     ) -> Optional[Dict[str, Any]]:
         """
         Unified ingress for multi-timeframe candle streams.
-        timeframe: "M1", "M5", or "M15".
+        timeframe: "M1", "M5", "M15", or "H1".
         Returns None or {direction, entry_price, stop_loss, take_profit, ...} if an M1 candle triggers an order.
         """
         tf = timeframe.upper().strip()
-        if tf in ("M5", "5M", "5"):
+        if tf in ("H1", "1H", "60"):
+            self.on_htf_candle(raw_candle, timeframe="H1")
+            return None
+        elif tf in ("M5", "5M", "5"):
             self.on_htf_candle(raw_candle, timeframe="M5")
             return None
         elif tf in ("M15", "15M", "15"):
@@ -337,7 +601,7 @@ class RuleEngine:
             sig = self.on_m1_candle(raw_candle)
             return sig.to_dict() if sig else None
         else:
-            raise ValueError(f"Unsupported timeframe: {timeframe}. Expected M1, M5, or M15.")
+            raise ValueError(f"Unsupported timeframe: {timeframe}. Expected M1, M5, M15, or H1.")
 
     def scan_multitimeframe_streams(
         self,
@@ -354,29 +618,35 @@ class RuleEngine:
         m1 = self._coerce_candles(m1_candles)
         m5 = self._coerce_candles(m5_candles) if m5_candles is not None else (resample_m1_to_htf(m1, 5) if self.check_m5 else [])
         m15 = self._coerce_candles(m15_candles) if m15_candles is not None else (resample_m1_to_htf(m1, 15) if self.check_m15 else [])
+        h1 = resample_m1_to_htf(m1, 60) if self.h1_trend_filter else []
 
-        # Priority: HTF closes before M1 when timestamps coincide
+        # Priority: H1 (0) -> M15 (1) -> M5 (2) -> M1 (3)
         events: List[Tuple[datetime, int, str, Candle]] = []
+
+        if self.h1_trend_filter:
+            for c in h1:
+                close_time = c.timestamp + timedelta(hours=1)
+                events.append((close_time, 0, "H1", c))
 
         if self.check_m15:
             for c in m15:
                 close_time = c.timestamp + timedelta(minutes=15)
-                events.append((close_time, 0, "M15", c))
+                events.append((close_time, 1, "M15", c))
 
         if self.check_m5:
             for c in m5:
                 close_time = c.timestamp + timedelta(minutes=5)
-                events.append((close_time, 1, "M5", c))
+                events.append((close_time, 2, "M5", c))
 
         for c in m1:
             close_time = c.timestamp + timedelta(minutes=1)
-            events.append((close_time, 2, "M1", c))
+            events.append((close_time, 3, "M1", c))
 
         events.sort(key=lambda x: (x[0], x[1]))
 
         signals: List[TradeSignal] = []
         for close_time, priority, tf, c in events:
-            if tf in ("M5", "M15"):
+            if tf in ("H1", "M5", "M15"):
                 self.on_htf_candle(c, timeframe=tf)
             elif tf == "M1":
                 sig = self.on_m1_candle(c)
@@ -418,7 +688,14 @@ class RuleEngine:
             buffer_pips=self.buffer_pips,
             pip_size=self.pip_size,
             spread_pips=self.spread_pips,
+            use_c1_only_sl=self.use_c1_only_sl,
             reward_risk_ratio=self.reward_risk_ratio,
+            use_sweep_wick_sl=self.use_sweep_wick_sl,
+            min_displacement_ratio=self.min_displacement_ratio,
+            min_risk_pips=self.min_risk_pips,
+            partial_bank_r=self.partial_bank_r,
+            partial_bank_pct=self.partial_bank_pct,
+            breakeven_trigger_r=self.breakeven_trigger_r,
         )
         if signal is None:
             return None
