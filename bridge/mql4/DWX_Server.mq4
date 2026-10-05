@@ -23,6 +23,7 @@ static ulong    g_lastAccountExportMs = 0;
 
 // Forward declaration
 void ExportAccountInfo();
+void EnsureChartIsOpen(string sym, int tf);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -37,6 +38,10 @@ int OnInit()
    Print("[DWX_AutoTrader] Commands file:    ", CommandsFilename);
    Print("[DWX_AutoTrader] Reports file:     ", ReportsFilename);
    Print("[DWX_AutoTrader] Account file:     ", AccountFilename);
+
+   // Ensure required charts are active in terminal for multi-timeframe streaming
+   EnsureChartIsOpen(Symbol(), PERIOD_M1);
+   EnsureChartIsOpen(Symbol(), PERIOD_M15);
 
    // Export initial historical bars and account state
    ExportRecentBars(ExportBarsCount);
@@ -82,13 +87,30 @@ void OnTimer()
 {
    ProcessPendingCommands();
 
-   // Export account state every 1 second
+   // Export account state and multi-timeframe closed bars every 1 second
    ulong now = GetTickCount();
    if (now - g_lastAccountExportMs >= 1000)
    {
       g_lastAccountExportMs = now;
       ExportAccountInfo();
+      ExportRecentBars(ExportBarsCount);
    }
+}
+
+void EnsureChartIsOpen(string sym, int tf)
+{
+   long chartId = ChartFirst();
+   while (chartId >= 0)
+   {
+      if (ChartSymbol(chartId) == sym && ChartPeriod(chartId) == tf)
+         return; // Already open
+      chartId = ChartNext(chartId);
+   }
+   long newChart = ChartOpen(sym, (ENUM_TIMEFRAMES)tf);
+   if (newChart > 0)
+      Print("[DWX_AutoTrader] Opened chart for ", sym, " M", tf, " ChartID=", newChart);
+   else
+      Print("[DWX_AutoTrader] Note: ChartOpen for ", sym, " M", tf, " returned ", newChart, " err=", GetLastError());
 }
 
 //+------------------------------------------------------------------+
@@ -99,7 +121,8 @@ void ExportBarsForSymbol(string sym, int tf, int count)
    int totalBars = iBars(sym, tf);
    if (totalBars <= 1)
    {
-      // Trigger background history load from broker
+      // Ensure chart is active in terminal to download and stream data
+      EnsureChartIsOpen(sym, tf);
       iClose(sym, tf, 0);
       return;
    }
@@ -138,13 +161,17 @@ void ExportBarsForSymbol(string sym, int tf, int count)
 //+------------------------------------------------------------------+
 void ExportRecentBars(int count)
 {
-   ExportBarsForSymbol(Symbol(), Period(), count);
+   string sym1 = Symbol();
+   string sym2 = "USDCAD";
+   if (StringFind(sym1, "m") >= 0) sym2 = "USDCADm";
+   else if (StringFind(sym1, "c") >= 0) sym2 = "USDCADc";
 
-   string usdcadSym = "USDCAD";
-   if (StringFind(Symbol(), "m") >= 0) usdcadSym = "USDCADm";
-   else if (StringFind(Symbol(), "c") >= 0) usdcadSym = "USDCADc";
-
-   ExportBarsForSymbol(usdcadSym, Period(), count);
+   int tfs[3] = {PERIOD_M1, PERIOD_M5, PERIOD_M15};
+   for (int i = 0; i < 3; i++)
+   {
+      ExportBarsForSymbol(sym1, tfs[i], count);
+      ExportBarsForSymbol(sym2, tfs[i], count);
+   }
 }
 
 //+------------------------------------------------------------------+

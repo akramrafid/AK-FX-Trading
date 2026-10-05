@@ -17,6 +17,8 @@ class ApiService {
   bool _isConnected = false;
   bool _isDisposed = false;
 
+  void Function(bool connected)? onConnectionChange;
+
   ApiService({
     this.baseUrl = 'http://127.0.0.1:8642',
     this.wsUrl = 'ws://127.0.0.1:8642/ws',
@@ -34,10 +36,13 @@ class ApiService {
     _disconnectWebSocket();
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _isConnected = true;
 
       _channel!.stream.listen(
         (message) {
+          if (!_isConnected) {
+            _isConnected = true;
+            onConnectionChange?.call(true);
+          }
           try {
             final data = json.decode(message as String) as Map<String, dynamic>;
             _eventStreamController?.add(data);
@@ -69,10 +74,14 @@ class ApiService {
   }
 
   void _onDisconnect() {
+    final wasConnected = _isConnected;
     _isConnected = false;
     _channel = null;
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
+    if (wasConnected) {
+      onConnectionChange?.call(false);
+    }
     if (_isDisposed) return;
     _reconnectTimer = Timer(const Duration(seconds: 3), () {
       if (!_isDisposed) {

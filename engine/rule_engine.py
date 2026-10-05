@@ -528,9 +528,9 @@ class RuleEngine:
 
         is_matching = False
         if self.armed_state.direction == Direction.BUY:
-            is_matching = candle.is_bullish
+            is_matching = (candle.close >= candle.open)  # Bullish or neutral doji (not bearish)
         elif self.armed_state.direction == Direction.SELL:
-            is_matching = candle.is_bearish
+            is_matching = (candle.close <= candle.open)  # Bearish or neutral doji (not bullish)
 
         if is_matching:
             self.armed_state.confirming_candles.append(candle)

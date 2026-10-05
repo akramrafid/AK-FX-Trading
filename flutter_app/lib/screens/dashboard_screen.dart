@@ -9,6 +9,7 @@ import '../widgets/transactions_table.dart';
 import '../widgets/account_card.dart';
 import '../widgets/risk_meter_card.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/tactile_wrapper.dart';
 import 'settings_dialog.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -50,6 +51,30 @@ class DashboardScreen extends StatelessWidget {
               ),
 
               const Divider(color: AppColors.borderSubtle, height: 1),
+              if (!provider.isConnected)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: AppSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentRed.withValues(alpha: 0.15),
+                    border: const Border(bottom: BorderSide(color: AppColors.accentRed, width: 1)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.cloud_off_rounded, size: 14, color: AppColors.accentRed),
+                      const SizedBox(width: 8),
+                      Text(
+                        'LOCAL API BRIDGE OFFLINE — Launch backend with scripts\\run_app.bat or python -m api.server',
+                        style: AppTypography.mono(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.accentRed,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // Main Workspace Grid
               Expanded(
@@ -190,7 +215,7 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 _buildAnalyticsCard(
                   'TODAY PROFIT',
-                  '+${account.profit >= 0 ? "+" : ""}\$${account.profit.toStringAsFixed(2)}',
+                  '${account.profit >= 0 ? "+" : ""}\$${account.profit.toStringAsFixed(2)}',
                   '+0.75% Return',
                   AppColors.accentGreen,
                 ),
@@ -240,13 +265,24 @@ class DashboardScreen extends StatelessWidget {
 
   static Widget _buildAnalyticsCard(String label, String value, String sub, Color accent) {
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        decoration: BoxDecoration(
-          color: AppColors.bgCardLight.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.borderSubtle),
-        ),
+      child: TactileWrapper(
+        onTap: () {},
+        pressScale: 0.98,
+        hoverScale: 1.01,
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: AppColors.bgCardLight.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(color: AppColors.borderSubtle),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -282,6 +318,7 @@ class DashboardScreen extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

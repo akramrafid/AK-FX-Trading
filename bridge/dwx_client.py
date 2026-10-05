@@ -177,6 +177,24 @@ class DWXClient:
     def reports_file(self) -> Path:
         return self.files_dir / "DWX_Reports.txt"
 
+    @property
+    def account_file(self) -> Path:
+        return self.files_dir / "DWX_Account.txt"
+
+    def read_account_info(self) -> Optional[dict]:
+        """Reads and parses the latest MT4 account state and open orders from DWX_Account.txt."""
+        f = self.account_file
+        if not f.exists():
+            return None
+        try:
+            content = self.atomic_read(f)
+            if not content.strip():
+                return None
+            return json.loads(content)
+        except Exception as e:
+            logger.debug(f"Could not read DWX_Account.txt: {e}")
+            return None
+
     def get_bars_file(self, symbol: str, timeframe: str = "M5") -> Path:
         clean_symbol = symbol.strip().replace("/", "")
         clean_tf = timeframe.strip().upper()

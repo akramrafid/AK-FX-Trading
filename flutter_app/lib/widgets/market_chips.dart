@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
+import 'tactile_wrapper.dart';
 
 class MarketChips extends StatelessWidget {
   const MarketChips({super.key});
@@ -55,6 +56,11 @@ class MarketChips extends StatelessWidget {
       },
     ];
 
+    // Concentric radius geometry: outerRadius = innerRadius + padding
+    const double outerRadius = AppRadius.lg; // 16.0
+    const double cardPadding = 10.0;
+    const double innerIconRadius = outerRadius - cardPadding; // 6.0 (concentric!)
+
     return Row(
       children: pairs.map((pair) {
         final symbol = pair['symbol'] as String;
@@ -65,17 +71,17 @@ class MarketChips extends StatelessWidget {
         return Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            child: InkWell(
+            child: TactileWrapper(
               onTap: () => provider.selectPair(symbol),
-              borderRadius: BorderRadius.circular(AppRadius.lg),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.all(AppSpacing.md),
+                duration: AppMotion.fast,
+                curve: AppMotion.easeOut,
+                padding: const EdgeInsets.all(cardPadding),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? AppColors.bgCardLight
                       : AppColors.bgCardDark.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  borderRadius: BorderRadius.circular(outerRadius),
                   border: Border.all(
                     color: isSelected ? AppColors.accentLime : AppColors.borderSubtle,
                     width: isSelected ? 1.5 : 1.0,
@@ -83,8 +89,9 @@ class MarketChips extends StatelessWidget {
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: AppColors.accentLime.withValues(alpha: 0.12),
-                            blurRadius: 12,
+                            color: AppColors.accentLime.withValues(alpha: 0.15),
+                            blurRadius: 14,
+                            spreadRadius: -2,
                             offset: const Offset(0, 4),
                           ),
                         ]
@@ -95,11 +102,13 @@ class MarketChips extends StatelessWidget {
                     Container(
                       width: 32,
                       height: 32,
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        borderRadius: BorderRadius.circular(innerIconRadius),
+                        border: Border.all(color: color.withValues(alpha: 0.25), width: 1.0),
                       ),
-                      child: Icon(pair['icon'] as IconData, size: 17, color: color),
+                      child: Icon(pair['icon'] as IconData, size: 16, color: color),
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
@@ -121,13 +130,15 @@ class MarketChips extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                 decoration: BoxDecoration(
-                                  color: AppColors.bgSurface.withValues(alpha: 0.6),
-                                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                                  color: AppColors.bgSurface.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(AppRadius.xs),
+                                  border: Border.all(color: AppColors.glassBorder.withValues(alpha: 0.3)),
                                 ),
                                 child: Text(
                                   symbol,
                                   style: AppTypography.mono(
                                     fontSize: 9.5,
+                                    fontWeight: FontWeight.w600,
                                     color: AppColors.textMuted,
                                   ),
                                 ),
@@ -137,7 +148,7 @@ class MarketChips extends StatelessWidget {
                                 pair['change'] as String,
                                 style: TextStyle(
                                   fontFamily: 'Segoe UI',
-                                  fontSize: 10,
+                                  fontSize: 10.5,
                                   fontWeight: FontWeight.w700,
                                   color: isUp ? AppColors.accentGreen : AppColors.accentRed,
                                 ),
@@ -150,17 +161,25 @@ class MarketChips extends StatelessWidget {
                               Text(
                                 pair['price'] as String,
                                 style: AppTypography.mono(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w500,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
                                   color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
                                 ),
                               ),
                               const Spacer(),
-                              Text(
-                                '${pair['spread']}p',
-                                style: AppTypography.mono(
-                                  fontSize: 9.5,
-                                  color: AppColors.textMuted,
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppColors.bgSurface.withValues(alpha: 0.4),
+                                  borderRadius: BorderRadius.circular(AppRadius.xs),
+                                ),
+                                child: Text(
+                                  '${pair['spread']}p spread',
+                                  style: AppTypography.mono(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textMuted,
+                                  ),
                                 ),
                               ),
                             ],

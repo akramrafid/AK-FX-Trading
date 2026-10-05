@@ -247,6 +247,14 @@ class BridgeController:
         except Exception:
             pass
 
+        strategy_mode = "c1_wickswap"
+        try:
+            from config import load_config
+            cfg = load_config()
+            strategy_mode = getattr(cfg, "strategy_mode", "c1_wickswap")
+        except Exception:
+            pass
+
         return {
             "bridge_running": self.is_running,
             "emergency_halt": halted,
@@ -261,6 +269,7 @@ class BridgeController:
             "open_trades": open_trades,
             "mt4_connected": mt4_connected,
             "mt4_age_sec": round(mt4_age, 1),
+            "strategy_mode": strategy_mode,
         }
 
     def start(self) -> Dict[str, Any]:
@@ -452,6 +461,12 @@ class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug(f"HTTP {args}")
 
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+            self.close_connection = True
+
     # ── CORS ─────────────────────────────────────────────────────────────
     def _set_cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -462,6 +477,15 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self._set_cors()
         self.end_headers()
+
+    def _send_json(self, data: Any, status_code: int = 200) -> None:
+        body = json_response(data)
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._set_cors()
+        self.end_headers()
+        self.wfile.write(body)
 
     # ── GET routes ───────────────────────────────────────────────────────
     def do_GET(self) -> None:
@@ -485,24 +509,12 @@ class APIHandler(BaseHTTPRequestHandler):
         handler = routes.get(path)
         if handler is not None:
             data = handler()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self._set_cors()
-            self.end_headers()
-            self.wfile.write(json_response(data))
+            self._send_json(data, 200)
         elif not path.startswith("/api/"):
             if not self._serve_static(path):
-                self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self._set_cors()
-                self.end_headers()
-                self.wfile.write(json_response({"error": "not_found"}))
+                self._send_json({"error": "not_found"}, 404)
         else:
-            self.send_response(404)
-            self.send_header("Content-Type", "application/json")
-            self._set_cors()
-            self.end_headers()
-            self.wfile.write(json_response({"error": "not_found"}))
+            self._send_json({"error": "not_found"}, 404)
 
     def _serve_static(self, path: str) -> bool:
         web_dir = Path(__file__).resolve().parent.parent / "flutter_app" / "build" / "web"
@@ -572,17 +584,9 @@ class APIHandler(BaseHTTPRequestHandler):
         handler = routes.get(path)
         if handler is not None:
             data = handler()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self._set_cors()
-            self.end_headers()
-            self.wfile.write(json_response(data))
+            self._send_json(data, 200)
         else:
-            self.send_response(404)
-            self.send_header("Content-Type", "application/json")
-            self._set_cors()
-            self.end_headers()
-            self.wfile.write(json_response({"error": "not_found"}))
+            self._send_json({"error": "not_found"}, 404)
 
     # ── Data handlers ────────────────────────────────────────────────────
     def _read_mt4_account_info(self) -> Optional[Dict[str, Any]]:
@@ -991,6 +995,11 @@ class APIHandler(BaseHTTPRequestHandler):
                         continue
                 updated_lines.append(line)
 
+            for key, val in new_settings.items():
+                if key not in updated_keys:
+                    updated_lines.append(f"{key}={val}")
+                    updated_keys.add(key)
+
             env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
             return {"status": "updated", "keys": list(updated_keys)}
         except Exception as e:
@@ -1005,7 +1014,7 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         accept = base64.b64encode(
-            hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-5AB5DC11E65B").encode()).digest()
+            hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
         ).decode()
 
         self.send_response(101, "Switching Protocols")

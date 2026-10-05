@@ -38,7 +38,7 @@ class TradingProvider extends ChangeNotifier {
   String get chartMode => _chartMode;
   int get selectedTabIndex => _selectedTabIndex;
   bool get isLoading => _isLoading;
-  bool get isConnected => api.isConnected;
+  bool get isConnected => api.isConnected || _bridgeState.isRunning;
   List<String> get activityLogs => List.unmodifiable(_activityLogs);
 
   void selectTab(int index) {
@@ -49,6 +49,10 @@ class TradingProvider extends ChangeNotifier {
   // ── Initialization ───────────────────────────────────────────────────
 
   void init() {
+    api.onConnectionChange = (_) {
+      notifyListeners();
+    };
+
     api.connectWebSocket();
 
     _eventSub = api.eventStream.listen((event) {
@@ -249,12 +253,13 @@ class TradingProvider extends ChangeNotifier {
     return ok;
   }
 
-  void selectPair(String pair) {
+  Future<void> selectPair(String pair) async {
     final normalized = pair.toUpperCase().contains('CAD') ? 'USDCADm' : 'EURUSDm';
     if (_activePair != normalized) {
       _activePair = normalized;
+      _candles = [];
       notifyListeners();
-      _pollUpdates();
+      await _pollUpdates();
     }
   }
 

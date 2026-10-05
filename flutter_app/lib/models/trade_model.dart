@@ -234,6 +234,7 @@ class BridgeState {
   final int openTrades;
   final String watchdogState;
   final String watchdogMessage;
+  final String strategyMode;
 
   BridgeState({
     this.isRunning = false,
@@ -245,6 +246,7 @@ class BridgeState {
     this.openTrades = 0,
     this.watchdogState = 'HEALTHY',
     this.watchdogMessage = 'System operational',
+    this.strategyMode = 'c1_wickswap',
   });
 
   factory BridgeState.fromJson(Map<String, dynamic> json) {
@@ -259,6 +261,7 @@ class BridgeState {
       openTrades: json['open_trades'] is int ? json['open_trades'] : 0,
       watchdogState: wd?['state'] ?? 'HEALTHY',
       watchdogMessage: wd?['message'] ?? 'System operational',
+      strategyMode: json['strategy_mode'] ?? 'c1_wickswap',
     );
   }
 }

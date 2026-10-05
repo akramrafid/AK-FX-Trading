@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/tactile_button.dart';
+import '../widgets/tactile_wrapper.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key});
@@ -22,6 +24,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late TextEditingController _telegramTokenCtrl;
   late TextEditingController _telegramChatIdCtrl;
 
+  String _strategyMode = 'c1_wickswap';
   bool _isSaving = false;
 
   @override
@@ -29,6 +32,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     super.initState();
     final settings = context.read<TradingProvider>().settings;
 
+    _strategyMode = settings['STRATEGY_MODE'] ?? 'c1_wickswap';
     _symbolCtrl = TextEditingController(text: settings['TRADING_SYMBOL'] ?? 'EURUSDm');
     _timeframeCtrl = TextEditingController(text: settings['TRADING_TIMEFRAME'] ?? 'M5');
     _riskPctCtrl = TextEditingController(text: settings['RISK_PER_TRADE_PCT'] ?? '0.015');
@@ -61,6 +65,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     final provider = context.read<TradingProvider>();
 
     final Map<String, String> newSettings = {
+      'STRATEGY_MODE': _strategyMode,
       'TRADING_SYMBOL': _symbolCtrl.text.trim(),
       'TRADING_TIMEFRAME': _timeframeCtrl.text.trim(),
       'RISK_PER_TRADE_PCT': _riskPctCtrl.text.trim(),
@@ -122,10 +127,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
-                    splashRadius: 18,
+                  TactileWrapper(
+                    onTap: () => Navigator.of(context).pop(),
+                    pressScale: 0.90,
+                    hoverScale: 1.10,
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.bgCardLight.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.glassBorder),
+                      ),
+                      child: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 18),
+                    ),
                   ),
                 ],
               ),
@@ -140,6 +156,100 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _sectionTitle('STRATEGY PRESET & EXECUTION MODEL'),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.bgCardLight.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setState(() => _strategyMode = 'c1_wickswap'),
+                                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: _strategyMode == 'c1_wickswap'
+                                          ? AppColors.accentLime.withValues(alpha: 0.2)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                                      border: _strategyMode == 'c1_wickswap'
+                                          ? Border.all(color: AppColors.accentLime)
+                                          : null,
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          'C1 Wick-Swap (Active Test)',
+                                          style: TextStyle(
+                                            fontFamily: 'Segoe UI',
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: _strategyMode == 'c1_wickswap'
+                                                ? AppColors.accentLime
+                                                : AppColors.textSecondary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          '1:5 R:R • BE @ 2.0R • C1 Stop',
+                                          style: TextStyle(fontSize: 10, color: AppColors.textMuted),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setState(() => _strategyMode = 'institutional'),
+                                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: _strategyMode == 'institutional'
+                                          ? AppColors.accentBlue.withValues(alpha: 0.2)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                                      border: _strategyMode == 'institutional'
+                                          ? Border.all(color: AppColors.accentBlue)
+                                          : null,
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          'Institutional Mode',
+                                          style: TextStyle(
+                                            fontFamily: 'Segoe UI',
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: _strategyMode == 'institutional'
+                                                ? AppColors.accentBlue
+                                                : AppColors.textSecondary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          '5 Pillars • Asian Sweeps • 70% @ 2R',
+                                          style: TextStyle(fontSize: 10, color: AppColors.textMuted),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
                       _sectionTitle('INSTRUMENT & SIZING'),
                       Row(
                         children: [
@@ -187,22 +297,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
+                  TactileButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+                    variant: TactileButtonVariant.ghost,
+                    label: 'Cancel',
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                   ),
                   const SizedBox(width: AppSpacing.md),
-                  ElevatedButton(
+                  TactileButton(
                     onPressed: _isSaving ? null : _save,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.accentLime,
-                      foregroundColor: AppColors.bgPrimary,
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-                    ),
-                    child: _isSaving
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Save Configuration', style: TextStyle(fontWeight: FontWeight.w700)),
+                    variant: TactileButtonVariant.primary,
+                    label: 'Save Configuration',
+                    isLoading: _isSaving,
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
                   ),
                 ],
               ),

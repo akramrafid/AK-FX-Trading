@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/trade_model.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
+import 'tactile_wrapper.dart';
 
 /// Interactive financial chart powered by the [financial_chart] package.
 /// Exclusively dedicated to EURUSD and USDCAD forex pairs with real-time MT4 feeds
@@ -53,6 +54,18 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
     List<CandleData> list = [];
     if (candles.isNotEmpty) {
       list = List.from(candles);
+      // In live markets, dynamically update the forming candle with the live bid tick
+      if (liveBid > 0 && list.isNotEmpty) {
+        final last = list.last;
+        list[list.length - 1] = CandleData(
+          time: last.time,
+          open: last.open,
+          high: max(last.high, liveBid),
+          low: min(last.low, liveBid),
+          close: liveBid,
+          volume: last.volume > 0 ? last.volume : 50.0,
+        );
+      }
     } else {
       // Synthesize realistic historical bars anchored to live bid if waiting for initial feed
       final base = liveBid > 0 ? liveBid : 1.13737;
@@ -408,18 +421,21 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
     final activeTf = provider.activeTimeframe;
     final account = provider.account;
 
+    final activeBid = account.bid > 0
+        ? account.bid
+        : (candles.isNotEmpty ? candles.last.close : (activePair.contains('CAD') ? 1.4250 : 1.1250));
+
     // Check if chart needs to be rebuilt based on data or customisation signature
-    final sig = '$activePair-$activeTf-${candles.length}-${candles.isNotEmpty ? candles.last.close : account.bid}-'
+    final sig = '$activePair-$activeTf-${candles.length}-$activeBid-'
         '$_chartType-$_colorTheme-$_showSMA20-$_showEMA50-$_showVolume-$_showGrids-$_showCrosshair';
 
     if (_chart == null || _lastBuiltSignature != sig) {
       _chart?.dispose();
-      _chart = _buildGChart(candles, account.bid, activePair);
+      _chart = _buildGChart(candles, activeBid, activePair);
       _lastBuiltSignature = sig;
     }
 
     final isEur = activePair.toUpperCase().contains('EUR');
-    final activeBid = account.bid;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -652,13 +668,15 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                       border: Border.all(color: AppColors.accentPurple.withValues(alpha: 0.4)),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.tune_rounded, size: 13, color: AppColors.accentPurple),
-                        SizedBox(width: 4),
+                        const Icon(Icons.tune_rounded, size: 13, color: AppColors.accentPurple),
+                        const SizedBox(width: 4),
                         Text(
-                          '10:1 R:R Rule Active',
-                          style: TextStyle(
+                          provider.bridgeState.strategyMode == 'institutional'
+                              ? '1:5 R:R (Institutional)'
+                              : '1:5 R:R (BE @ 2R)',
+                          style: const TextStyle(
                             fontFamily: 'Segoe UI',
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
@@ -690,6 +708,7 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
                 if (_chart != null)
                   Positioned.fill(
                     child: GChartWidget(
+                      key: ValueKey(sig),
                       chart: _chart!,
                       tickerProvider: this,
                     ),
@@ -726,11 +745,13 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return InkWell(
+    return TactileWrapper(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
+      pressScale: 0.96,
+      hoverScale: 1.02,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: AppMotion.fast,
+        curve: AppMotion.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: isSelected
@@ -741,6 +762,15 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
             color: isSelected ? AppColors.accentBlue : AppColors.glassBorder,
             width: isSelected ? 1.4 : 1.0,
           ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: AppColors.accentBlue.withValues(alpha: 0.25),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -770,9 +800,10 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
     final isSelected = _chartType == type;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
+      child: TactileWrapper(
         onTap: () => setState(() => _chartType = type),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        pressScale: 0.94,
+        hoverScale: 1.05,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
           decoration: BoxDecoration(
@@ -790,11 +821,13 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
   }
 
   Widget _buildTogglePill(String label, bool isActive, Color color, VoidCallback onTap) {
-    return InkWell(
+    return TactileWrapper(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
+      pressScale: 0.95,
+      hoverScale: 1.03,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
+        duration: AppMotion.fast,
+        curve: AppMotion.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(
           color: isActive ? color.withValues(alpha: 0.18) : Colors.transparent,
@@ -803,6 +836,15 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
             color: isActive ? color.withValues(alpha: 0.6) : AppColors.borderSubtle,
             width: 1.0,
           ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.2),
+                    blurRadius: 6,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
         ),
         child: Text(
           label,

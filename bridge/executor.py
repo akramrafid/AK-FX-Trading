@@ -411,13 +411,26 @@ class BridgeExecutor:
         # If RiskGuardrails are wired, this is the MANDATORY checkpoint.
         # A rejected trade NEVER reaches DWX dispatch.
         if self.risk_guardrails is not None:
+            # Sync active trades with live MT4 account state if available
+            acc_info = self.dwx_client.read_account_info()
+            if acc_info and "orders" in acc_info:
+                live_tickets = {int(o["ticket"]) for o in acc_info["orders"] if "ticket" in o}
+                closed_tickets = [t for t in self.active_trades if t not in live_tickets]
+                for t in closed_tickets:
+                    del self.active_trades[t]
+                open_count = len(live_tickets)
+            elif self.active_trades:
+                open_count = len(self.active_trades)
+            else:
+                open_count = len([r for r in self.order_records if r.status == "FILLED"])
+
             account_state = AccountState(
                 starting_daily_balance=self.balance,
                 current_balance=self.balance,
                 current_equity=self.balance,  # updated by live feed in production
                 realized_daily_pnl=Decimal("0.00"),
                 unrealized_daily_pnl=Decimal("0.00"),
-                open_trade_count=len([r for r in self.order_records if r.status == "FILLED"]),
+                open_trade_count=open_count,
                 daily_trades_count=len([r for r in self.order_records if r.status in ("FILLED", "UNCONFIRMED")]),
                 current_spread_pips=Decimal("0.0"),  # populated by live feed in production
                 timestamp=signal_time,
@@ -690,8 +703,8 @@ def main() -> None:
     print(f"  Symbol:            {cfg.symbol}")
     print(f"  Timeframe:         {cfg.timeframe}")
     print(f"  Balance:           ${cfg.initial_balance:,.2f}")
-    print(f"  Risk / Trade:      {cfg.risk_pct * Decimal('100'):.1f}%")
-    print(f"  Max Daily Loss:    {cfg.max_daily_loss_pct * Decimal('100'):.1f}%")
+    daily_loss_display = f"{cfg.max_daily_loss_pct * Decimal('100'):.1f}%" if cfg.max_daily_loss_pct is not None else "Unlimited (No limit)"
+    print(f"  Max Daily Loss:    {daily_loss_display}")
     print(f"  Max Daily Trades:  {cfg.max_daily_trades if cfg.max_daily_trades is not None else 'Unlimited (No limit)'}")
     print(f"  Spread Ceiling:    {cfg.max_spread_pips} pips")
     print(f"  Session Filter:    {cfg.session_start_hour:02d}:00 - {cfg.session_end_hour:02d}:00 UTC (London + NY + Overlap)")

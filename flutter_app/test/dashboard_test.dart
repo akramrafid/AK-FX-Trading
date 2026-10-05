@@ -28,7 +28,7 @@ void main() {
 
     // Verify TradingChart
     expect(find.byType(TradingChart), findsOneWidget);
-    expect(find.text('10:1 R:R Rule Active'), findsOneWidget);
+    expect(find.text('1:5 R:R (BE @ 2R)'), findsOneWidget);
 
     // Verify TransactionsTable
     expect(find.byType(TransactionsTable), findsOneWidget);

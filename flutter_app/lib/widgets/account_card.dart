@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
 import 'glass_card.dart';
+import 'tactile_button.dart';
+import 'tactile_wrapper.dart';
 
 class AccountCard extends StatelessWidget {
   const AccountCard({super.key});
@@ -268,8 +270,10 @@ class AccountCard extends StatelessWidget {
 
           // ── Overlapping Center Action / Swap Pill ───────────────────
           Center(
-            child: Transform.translate(
-              offset: const Offset(0, 0),
+            child: TactileWrapper(
+              onTap: () {},
+              pressScale: 0.93,
+              hoverScale: 1.08,
               child: Container(
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 width: 32,
@@ -277,13 +281,8 @@ class AccountCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppColors.bgPrimary,
                   shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.accentCyan.withValues(alpha: 0.4), width: 1.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.accentCyan.withValues(alpha: 0.2),
-                      blurRadius: 8,
-                    ),
-                  ],
+                  border: Border.all(color: AppColors.accentCyan.withValues(alpha: 0.5), width: 1.5),
+                  boxShadow: AppShadows.accentGlow(AppColors.accentCyan, opacity: 0.3, blur: 10),
                 ),
                 child: const Icon(
                   Icons.swap_vert_rounded,
@@ -387,90 +386,41 @@ class AccountCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.xl),
 
           // ── Prominent Electric Lime CTA Button (TrendWise "Swap Now") ──
-          SizedBox(
+          TactileButton(
+            onPressed: () {
+              if (isRunning) {
+                provider.stopBridge();
+              } else {
+                provider.startBridge();
+              }
+            },
+            variant: isRunning ? TactileButtonVariant.secondary : TactileButtonVariant.primary,
+            height: 48,
             width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: () {
-                if (isRunning) {
-                  provider.stopBridge();
-                } else {
-                  provider.startBridge();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isRunning ? AppColors.accentOrange : AppColors.accentLime,
-                foregroundColor: AppColors.bgPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                ),
-                elevation: isRunning ? 0 : 8,
-                shadowColor: AppColors.accentLime.withValues(alpha: 0.4),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    isRunning ? Icons.pause_circle_filled_rounded : Icons.play_arrow_rounded,
-                    color: AppColors.bgPrimary,
-                    size: 22,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text(
-                    isRunning ? 'PAUSE BRIDGE EXECUTION' : 'Start Live Trading',
-                    style: const TextStyle(
-                      fontFamily: 'Segoe UI',
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.6,
-                      color: AppColors.bgPrimary,
-                    ),
-                  ),
-                ],
-              ),
+            borderRadius: AppRadius.lg,
+            icon: Icon(
+              isRunning ? Icons.pause_circle_filled_rounded : Icons.play_arrow_rounded,
+              color: isRunning ? AppColors.accentOrange : AppColors.bgPrimary,
+              size: 20,
             ),
+            label: isRunning ? 'PAUSE BRIDGE EXECUTION' : 'Start Live Trading',
           ),
 
           const SizedBox(height: AppSpacing.sm),
 
           // ── Emergency Kill-Switch Button ────────────────────────────
-          SizedBox(
+          TactileButton(
+            onPressed: () => provider.toggleEmergencyHalt(),
+            variant: isHalted ? TactileButtonVariant.secondary : TactileButtonVariant.danger,
+            height: 40,
             width: double.infinity,
-            height: 38,
-            child: OutlinedButton(
-              onPressed: () => provider.toggleEmergencyHalt(),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: isHalted ? AppColors.accentGreen : AppColors.accentRed,
-                side: BorderSide(
-                  color: isHalted
-                      ? AppColors.accentGreen.withValues(alpha: 0.6)
-                      : AppColors.accentRed.withValues(alpha: 0.6),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    isHalted ? Icons.lock_open_rounded : Icons.shield_rounded,
-                    size: 15,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(
-                    isHalted ? 'RESUME FROM EMERGENCY HALT' : 'Emergency Kill-Switch',
-                    style: const TextStyle(
-                      fontFamily: 'Segoe UI',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
+            borderRadius: AppRadius.md,
+            icon: Icon(
+              isHalted ? Icons.lock_open_rounded : Icons.shield_rounded,
+              size: 15,
+              color: isHalted ? AppColors.accentGreen : AppColors.accentRed,
             ),
+            label: isHalted ? 'RESUME FROM EMERGENCY HALT' : 'Emergency Kill-Switch',
           ),
         ],
       ),

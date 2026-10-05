@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
+import 'tactile_wrapper.dart';
 
 class HeaderNav extends StatelessWidget {
   final int selectedIndex;
@@ -121,16 +122,27 @@ class HeaderNav extends StatelessWidget {
                       final isSelected = selectedIndex == idx;
                       final item = tabs[idx];
 
-                      return InkWell(
+                      return TactileWrapper(
                         onTap: () => onTabSelected(idx),
-                        borderRadius: BorderRadius.circular(AppRadius.xl),
+                        pressScale: 0.96,
+                        hoverScale: 1.02,
                         child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
+                          duration: AppMotion.fast,
+                          curve: AppMotion.easeOut,
                           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
                           decoration: BoxDecoration(
                             color: isSelected ? AppColors.bgCardLight : Colors.transparent,
                             borderRadius: BorderRadius.circular(AppRadius.xl),
                             border: isSelected ? Border.all(color: AppColors.glassBorder) : null,
+                            boxShadow: isSelected
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.25),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ]
+                                : null,
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -306,23 +318,72 @@ class HeaderNav extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
 
               // Emergency Kill Switch
-              IconButton(
-                onPressed: () => provider.toggleEmergencyHalt(),
-                icon: Icon(
-                  bridge.emergencyHalt ? Icons.play_arrow_rounded : Icons.stop_circle_outlined,
-                  color: bridge.emergencyHalt ? AppColors.accentGreen : AppColors.accentRed,
-                  size: 22,
+              TactileWrapper(
+                onTap: () => provider.toggleEmergencyHalt(),
+                pressScale: 0.90,
+                hoverScale: 1.10,
+                child: Tooltip(
+                  message: bridge.emergencyHalt ? 'Resume Bridge' : 'Emergency Kill Switch',
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: bridge.emergencyHalt
+                          ? AppColors.accentGreen.withValues(alpha: 0.15)
+                          : AppColors.accentRed.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: bridge.emergencyHalt
+                            ? AppColors.accentGreen.withValues(alpha: 0.5)
+                            : AppColors.accentRed.withValues(alpha: 0.5),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (bridge.emergencyHalt ? AppColors.accentGreen : AppColors.accentRed)
+                              .withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      bridge.emergencyHalt ? Icons.play_arrow_rounded : Icons.stop_circle_outlined,
+                      color: bridge.emergencyHalt ? AppColors.accentGreen : AppColors.accentRed,
+                      size: 20,
+                    ),
+                  ),
                 ),
-                tooltip: bridge.emergencyHalt ? 'Resume Bridge' : 'Emergency Kill Switch',
-                splashRadius: 20,
               ),
 
+              const SizedBox(width: AppSpacing.sm),
+
               // Settings Gear Button
-              IconButton(
-                onPressed: onOpenSettings,
-                icon: const Icon(Icons.settings_outlined, color: AppColors.textSecondary, size: 20),
-                tooltip: 'Trading Settings',
-                splashRadius: 20,
+              TactileWrapper(
+                onTap: onOpenSettings,
+                pressScale: 0.90,
+                hoverScale: 1.10,
+                child: Tooltip(
+                  message: 'Trading Settings',
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.bgCardLight.withValues(alpha: 0.6),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.glassBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.settings_outlined, color: AppColors.textSecondary, size: 19),
+                  ),
+                ),
               ),
             ],
           ),

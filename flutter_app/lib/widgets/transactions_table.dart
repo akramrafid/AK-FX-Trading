@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/trade_model.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
+import 'tactile_wrapper.dart';
 
 class TransactionsTable extends StatefulWidget {
   const TransactionsTable({super.key});
@@ -139,19 +140,23 @@ class _TransactionsTableState extends State<TransactionsTable> {
                     final timeFormat = DateFormat('HH:mm:ss');
                     final isPositive = trade.pnl >= 0;
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.bgCardLight.withValues(alpha: 0.28),
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                        border: Border.all(
-                          color: isBuy
-                              ? AppColors.accentGreen.withValues(alpha: 0.15)
-                              : AppColors.accentPurple.withValues(alpha: 0.15),
+                    return TactileWrapper(
+                      onTap: () {},
+                      pressScale: 0.99,
+                      hoverScale: 1.005,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.bgCardLight.withValues(alpha: 0.28),
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(
+                            color: isBuy
+                                ? AppColors.accentGreen.withValues(alpha: 0.2)
+                                : AppColors.accentPurple.withValues(alpha: 0.2),
+                          ),
                         ),
-                      ),
-                      child: Row(
+                        child: Row(
                         children: [
                           // 1. Order + Pair
                           Expanded(
@@ -302,8 +307,9 @@ class _TransactionsTableState extends State<TransactionsTable> {
                           ),
                         ],
                       ),
-                    );
-                  },
+                    ),
+                  );
+                },
                 ),
         ),
       ],
@@ -313,11 +319,13 @@ class _TransactionsTableState extends State<TransactionsTable> {
   Widget _buildSubTab(int index, String label, int count, Color activeColor) {
     final isSelected = _selectedSubTab == index;
 
-    return InkWell(
+    return TactileWrapper(
       onTap: () => setState(() => _selectedSubTab = index),
-      borderRadius: BorderRadius.circular(AppRadius.md),
+      pressScale: 0.95,
+      hoverScale: 1.02,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+        duration: AppMotion.fast,
+        curve: AppMotion.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: isSelected ? activeColor.withValues(alpha: 0.15) : Colors.transparent,
@@ -325,6 +333,15 @@ class _TransactionsTableState extends State<TransactionsTable> {
           border: Border.all(
             color: isSelected ? activeColor.withValues(alpha: 0.4) : Colors.transparent,
           ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: activeColor.withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

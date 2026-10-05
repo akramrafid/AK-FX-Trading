@@ -101,16 +101,17 @@ class RiskGuardrails:
             self._record_decision(res)
             return res
 
-        # 3. Maximum Open Trades Constraint
-        if account_state.open_trade_count >= self.limits.max_open_trades:
-            res = ValidationResult(
-                is_allowed=False,
-                reason=TradeRejectionReason.MAX_OPEN_TRADES_REACHED,
-                message=f"Max open trades reached: currently {account_state.open_trade_count} active (limit: {self.limits.max_open_trades}).",
-                timestamp=now_utc,
-            )
-            self._record_decision(res)
-            return res
+        # 3. Maximum Open Trades Constraint (enforced only when limit > 0; 0 or None = unlimited)
+        if self.limits.max_open_trades is not None and self.limits.max_open_trades > 0:
+            if account_state.open_trade_count >= self.limits.max_open_trades:
+                res = ValidationResult(
+                    is_allowed=False,
+                    reason=TradeRejectionReason.MAX_OPEN_TRADES_REACHED,
+                    message=f"Max open trades reached: currently {account_state.open_trade_count} active (limit: {self.limits.max_open_trades}).",
+                    timestamp=now_utc,
+                )
+                self._record_decision(res)
+                return res
 
         # 4. Maximum Daily Trades Constraint (enforced only when limit is set; None or <= 0 = unlimited)
         if self.limits.max_daily_trades is not None and self.limits.max_daily_trades > 0:

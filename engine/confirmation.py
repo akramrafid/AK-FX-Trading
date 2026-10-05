@@ -60,7 +60,8 @@ def evaluate_3_candles(
             return None
 
     if direction == Direction.BUY:
-        if not (c1.is_bullish and c2.is_bullish and c3.is_bullish):
+        # All 3 candles must be directional (bullish or neutral doji; none can close bearish)
+        if not (c1.close >= c1.open and c2.close >= c2.open and c3.close >= c3.open):
             return None
         entry_price = c3.close
         if use_sweep_wick_sl and sweep_extreme_price is not None:
@@ -102,7 +103,8 @@ def evaluate_3_candles(
         )
 
     elif direction == Direction.SELL:
-        if not (c1.is_bearish and c2.is_bearish and c3.is_bearish):
+        # All 3 candles must be directional (bearish or neutral doji; none can close bullish)
+        if not (c1.close <= c1.open and c2.close <= c2.open and c3.close <= c3.open):
             return None
         entry_price = c3.close
         if use_sweep_wick_sl and sweep_extreme_price is not None:

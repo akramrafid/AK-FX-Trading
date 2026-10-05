@@ -327,6 +327,74 @@ class TestMultiTimeframeRuleEngine(unittest.TestCase):
         self.assertAlmostEqual(sig.stop_loss, 1.0872)  # max(1.0872, 1.0862, 1.0852)
         self.assertAlmostEqual(sig.reward_risk_ratio, 5.0)
 
+    def test_sell_setup_m15_sweep_with_m1_confirmation_including_doji(self):
+        """
+        User setup from live EUR/USD chart:
+        15-minute Bullish candle wick swept by 15-minute Bearish candle.
+        Then 1-minute confirmation where candle 2 is a Doji (open == close).
+        Must successfully trigger a SELL signal.
+        """
+        # 15m candle 0 (10:00): Bullish (1.0850 -> 1.0880, high 1.0890)
+        m15_0 = make_candle(self.base_time, 1.0850, 1.0890, 1.0840, 1.0880)
+        # 15m candle 1 (10:15): Sweeps high 1.0890 with wick to 1.0910, closes bearish at 1.0875
+        m15_1 = make_candle(self.base_time + timedelta(minutes=15), 1.0880, 1.0910, 1.0870, 1.0875)
+
+        self.engine.on_htf_candle(m15_0, "M15")
+        armed = self.engine.on_htf_candle(m15_1, "M15")
+        self.assertTrue(self.engine.is_armed)
+        self.assertEqual(self.engine.armed_state.direction, Direction.SELL)
+        self.assertEqual(self.engine.armed_state.sweep_timeframe, "M15")
+
+        # 1m confirmation bars starting at 10:30
+        t_m1 = self.base_time + timedelta(minutes=30)
+        # C1: Bearish
+        m1_1 = make_candle(t_m1, 1.0875, 1.0878, 1.0860, 1.0865)
+        # C2: Flat neutral Doji (open == close == 1.0865)
+        m1_2 = make_candle(t_m1 + timedelta(minutes=1), 1.0865, 1.0868, 1.0860, 1.0865)
+        # C3: Bearish
+        m1_3 = make_candle(t_m1 + timedelta(minutes=2), 1.0865, 1.0868, 1.0850, 1.0852)
+
+        sig1 = self.engine.on_m1_candle(m1_1)
+        self.assertIsNone(sig1)
+        self.assertEqual(len(self.engine.armed_state.confirming_candles), 1)
+
+        sig2 = self.engine.on_m1_candle(m1_2)
+        self.assertIsNone(sig2)
+        # Doji is accepted and does NOT break the sequence!
+        self.assertEqual(len(self.engine.armed_state.confirming_candles), 2)
+
+        sig3 = self.engine.on_m1_candle(m1_3)
+        self.assertIsNotNone(sig3)
+        self.assertEqual(sig3.direction, "SELL")
+        self.assertAlmostEqual(sig3.entry_price, 1.0852)
+
+    def test_buy_setup_m5_sweep_with_m1_confirmation_including_doji(self):
+        """
+        5-minute Bearish candle wick swept by Bullish candle.
+        Then 1-minute confirmation where candle 2 is a Doji (open == close).
+        Must successfully trigger a BUY signal.
+        """
+        m5_0 = make_candle(self.base_time, 1.0880, 1.0890, 1.0840, 1.0850)
+        m5_1 = make_candle(self.base_time + timedelta(minutes=5), 1.0850, 1.0865, 1.0830, 1.0860)
+
+        self.engine.on_htf_candle(m5_0, "M5")
+        armed = self.engine.on_htf_candle(m5_1, "M5")
+        self.assertTrue(self.engine.is_armed)
+        self.assertEqual(self.engine.armed_state.direction, Direction.BUY)
+
+        t_m1 = self.base_time + timedelta(minutes=10)
+        m1_1 = make_candle(t_m1, 1.0860, 1.0870, 1.0858, 1.0868)
+        m1_2 = make_candle(t_m1 + timedelta(minutes=1), 1.0868, 1.0872, 1.0865, 1.0868)  # Doji
+        m1_3 = make_candle(t_m1 + timedelta(minutes=2), 1.0868, 1.0885, 1.0866, 1.0880)
+
+        self.assertIsNone(self.engine.on_m1_candle(m1_1))
+        self.assertIsNone(self.engine.on_m1_candle(m1_2))
+        sig3 = self.engine.on_m1_candle(m1_3)
+        self.assertIsNotNone(sig3)
+        self.assertEqual(sig3.direction, "BUY")
+        self.assertAlmostEqual(sig3.entry_price, 1.0880)
+
 
 if __name__ == "__main__":
     unittest.main()
+

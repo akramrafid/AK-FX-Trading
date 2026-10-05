@@ -14,8 +14,12 @@ class RiskMeterCard extends StatelessWidget {
     final account = provider.account;
 
     final tradesToday = bridge.ordersToday > 0 ? bridge.ordersToday : (account.tradesToday > 0 ? account.tradesToday : 1);
-    const maxTrades = 3;
-    final tradeRatio = (tradesToday / maxTrades).clamp(0.0, 1.0);
+    final isUnlimited = provider.settings['NO_TRADE_LIMITS'] == 'true' ||
+        bridge.strategyMode == 'institutional' ||
+        provider.settings['STRATEGY_MODE'] == 'institutional';
+
+    final maxTradesStr = isUnlimited ? '∞' : '3';
+    final tradeRatio = isUnlimited ? 0.35 : (tradesToday / 3.0).clamp(0.0, 1.0);
 
     return GlassCard(
       backgroundColor: AppColors.bgCardDark.withValues(alpha: 0.92),
@@ -28,12 +32,19 @@ class RiskMeterCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Row(
                   children: [
-                    Icon(Icons.shield_outlined, size: 15, color: AppColors.accentCyan),
-                    SizedBox(width: 7),
-                    Flexible(
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentCyan.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(AppRadius.xs),
+                      ),
+                      child: const Icon(Icons.shield_outlined, size: 14, color: AppColors.accentCyan),
+                    ),
+                    const SizedBox(width: 8),
+                    const Flexible(
                       child: Text(
                         'Risk Guardrails & Health',
                         overflow: TextOverflow.ellipsis,
@@ -81,9 +92,9 @@ class RiskMeterCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$tradesToday / $maxTrades',
+                      isUnlimited ? '$tradesToday orders' : '$tradesToday / $maxTradesStr',
                       style: AppTypography.mono(
-                        fontSize: 15,
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary,
                       ),
@@ -97,9 +108,9 @@ class RiskMeterCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    const Text(
-                      'Max: 3 orders',
-                      style: TextStyle(
+                    Text(
+                      isUnlimited ? 'Limit: None' : 'Max: 3 orders',
+                      style: const TextStyle(
                         fontFamily: 'Segoe UI',
                         fontSize: 9.5,
                         fontWeight: FontWeight.w600,
@@ -118,7 +129,7 @@ class RiskMeterCard extends StatelessWidget {
                     Text(
                       '0.0%',
                       style: AppTypography.mono(
-                        fontSize: 15,
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary,
                       ),
@@ -132,9 +143,9 @@ class RiskMeterCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    const Text(
-                      'Ceiling: 3.0%',
-                      style: TextStyle(
+                    Text(
+                      isUnlimited ? 'Unrestricted' : 'Ceiling: 3.0%',
+                      style: const TextStyle(
                         fontFamily: 'Segoe UI',
                         fontSize: 9.5,
                         fontWeight: FontWeight.w600,
@@ -153,7 +164,7 @@ class RiskMeterCard extends StatelessWidget {
                     Text(
                       '${account.spreadPips.toStringAsFixed(1)} p',
                       style: AppTypography.mono(
-                        fontSize: 15,
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w700,
                         color: account.spreadPips <= 2.5 ? AppColors.accentGreen : AppColors.accentOrange,
                       ),
