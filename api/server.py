@@ -35,8 +35,102 @@ from pathlib import Path
 from socketserver import ThreadingMixIn
 from typing import Any, Callable, Dict, List, Optional
 import socket
+import os
+import subprocess
 
 logger = logging.getLogger("api_server")
+
+
+# ---------------------------------------------------------------------------
+# MetaTrader 4 Process Management
+# ---------------------------------------------------------------------------
+
+def is_mt4_running() -> bool:
+    """Check if MetaTrader 4 (terminal.exe) process is currently running."""
+    try:
+        output = subprocess.check_output(
+            ["tasklist", "/fi", "imagename eq terminal.exe"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            text=True,
+            timeout=3,
+        )
+        return "terminal.exe" in output.lower()
+    except Exception as e:
+        logger.debug(f"is_mt4_running check: {e}")
+        return False
+
+
+def launch_mt4_terminal(custom_path: Optional[str | Path] = None) -> bool:
+    """Launch MetaTrader 4 terminal if not already running."""
+    if is_mt4_running():
+        logger.info("MetaTrader 4 terminal is already running.")
+        return True
+
+    candidates: List[Path] = []
+    if custom_path:
+        candidates.append(Path(custom_path))
+
+    try:
+        from config import load_config
+        cfg = load_config()
+        if getattr(cfg, "mt4_exe_path", None):
+            candidates.append(Path(cfg.mt4_exe_path))
+    except Exception:
+        pass
+
+    candidates.extend([
+        Path(r"C:\Program Files (x86)\MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files\MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files (x86)\Exness MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files\Exness MetaTrader 4\terminal.exe"),
+    ])
+
+    target_exe: Optional[Path] = None
+    for cand in candidates:
+        if cand and cand.is_file():
+            target_exe = cand
+            break
+
+    if not target_exe:
+        logger.warning(f"Could not locate terminal.exe among candidate paths: {candidates}")
+        return False
+
+    logger.info(f"Auto-launching MetaTrader 4 terminal from: {target_exe}")
+    # Method 1: Windows ShellExecute via os.startfile
+    try:
+        if hasattr(os, "startfile"):
+            try:
+                os.startfile(str(target_exe), cwd=str(target_exe.parent))
+            except TypeError:
+                os.startfile(str(target_exe))
+            time.sleep(2.0)
+            return True
+    except Exception as e:
+        logger.warning(f"os.startfile failed: {e}")
+
+    # Method 2: Windows Explorer desktop shell launch
+    try:
+        subprocess.Popen(
+            ["explorer.exe", str(target_exe)],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        time.sleep(2.0)
+        return True
+    except Exception as e:
+        logger.warning(f"explorer.exe launch failed: {e}")
+
+    # Method 3: PowerShell Start-Process fallback
+    try:
+        cmd = f"Start-Process -FilePath '{target_exe}' -WorkingDirectory '{target_exe.parent}'"
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        time.sleep(2.0)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to launch MetaTrader 4: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +362,7 @@ class BridgeController:
             "orders_today": orders_today,
             "open_trades": open_trades,
             "mt4_connected": mt4_connected,
+            "mt4_process_running": is_mt4_running(),
             "mt4_age_sec": round(mt4_age, 1),
             "strategy_mode": strategy_mode,
         }
@@ -276,6 +371,22 @@ class BridgeController:
         with self._lock:
             if self.is_running:
                 return {"status": "already_running"}
+
+            # Auto-launch MetaTrader 4 terminal if closed
+            mt4_launched = False
+            if not is_mt4_running():
+                logger.info("MetaTrader 4 terminal is closed. Auto-launching MT4 terminal...")
+                self.event_bus.broadcast("system_notice", {"message": "MetaTrader 4 is closed. Launching MT4 terminal automatically..."})
+                try:
+                    from config import load_config
+                    _cfg = load_config()
+                    mt4_path = getattr(_cfg, "mt4_exe_path", None)
+                except Exception:
+                    mt4_path = None
+                mt4_launched = launch_mt4_terminal(mt4_path)
+                if mt4_launched:
+                    self.event_bus.broadcast("system_notice", {"message": "MetaTrader 4 launched. Initializing trading bridge..."})
+                    time.sleep(2.0)
 
             try:
                 from config import load_config
@@ -398,7 +509,14 @@ class BridgeController:
                 self._bridge_thread = threading.Thread(target=run_bridge, name="bridge-thread", daemon=True)
                 self._bridge_thread.start()
                 self.event_bus.broadcast("bridge_started", {"symbol": ", ".join(symbols), "symbols": symbols, "timeframe": cfg.timeframe})
-                return {"status": "started", "symbol": ", ".join(symbols), "symbols": symbols, "timeframe": cfg.timeframe}
+                return {
+                    "status": "started",
+                    "mt4_launched": mt4_launched,
+                    "mt4_running": is_mt4_running(),
+                    "symbol": ", ".join(symbols),
+                    "symbols": symbols,
+                    "timeframe": cfg.timeframe,
+                }
 
             except Exception as e:
                 logger.error(f"Failed to start bridge: {e}")
@@ -442,6 +560,17 @@ class BridgeController:
                 rg.reset_emergency_halt()
         self.event_bus.broadcast("emergency_halt", {"active": False, "emergency_halt": False})
         return {"status": "resumed", "emergency_halt": False}
+
+    def launch_mt4(self) -> Dict[str, Any]:
+        """Explicitly launch MT4 terminal if not running."""
+        try:
+            from config import load_config
+            cfg = load_config()
+            exe_path = getattr(cfg, "mt4_exe_path", None)
+        except Exception:
+            exe_path = None
+        ok = launch_mt4_terminal(exe_path)
+        return {"status": "ok" if ok else "failed", "mt4_running": is_mt4_running()}
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +707,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "/api/bridge/stop": lambda: self.controller.stop(),
             "/api/bridge/halt": lambda: self.controller.emergency_halt(),
             "/api/bridge/resume": lambda: self.controller.resume(),
+            "/api/mt4/launch": lambda: self.controller.launch_mt4(),
             "/api/settings": self._post_settings,
         }
 
@@ -646,6 +776,21 @@ class APIHandler(BaseHTTPRequestHandler):
                             data["trades_today"] = data.get("open_orders_count", len(data.get("orders", [])))
                         if "open_trades" not in data:
                             data["open_trades"] = len(data.get("orders", []))
+                        if "orders" in data and isinstance(data["orders"], list):
+                            for ord_item in data["orders"]:
+                                if isinstance(ord_item, dict):
+                                    if "status" not in ord_item:
+                                        ord_item["status"] = "FILLED"
+                                    if "direction" not in ord_item and "type" in ord_item:
+                                        ord_item["direction"] = ord_item["type"]
+                                    if "entry_price" not in ord_item and "open_price" in ord_item:
+                                        ord_item["entry_price"] = ord_item["open_price"]
+                                    if "sl_price" not in ord_item and "sl" in ord_item:
+                                        ord_item["sl_price"] = ord_item["sl"]
+                                    if "tp_price" not in ord_item and "tp" in ord_item:
+                                        ord_item["tp_price"] = ord_item["tp"]
+                                    if "pnl" not in ord_item and "profit" in ord_item:
+                                        ord_item["pnl"] = ord_item["profit"]
                         data["pairs"] = pairs_dict
 
                         # If request specifies symbol query param
@@ -888,17 +1033,32 @@ class APIHandler(BaseHTTPRequestHandler):
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
         req_sym = qs.get("symbol", ["EURUSDm"])[0].upper()
+        req_tf = qs.get("timeframe", ["M5"])[0].upper()
 
-        filename = "DWX_Bars_USDCADm_M5.txt" if "USDCAD" in req_sym else "DWX_Bars_EURUSDm_M5.txt"
+        if "15" in req_tf:
+            tf = "M15"
+        elif "1" in req_tf:
+            tf = "M1"
+        else:
+            tf = "M5"
+
+        pair_name = "USDCAD" if "USDCAD" in req_sym else "EURUSD"
+        candidate_files = [
+            f"DWX_Bars_{pair_name}m_{tf}.txt",
+            f"DWX_Bars_{pair_name}_{tf}.txt",
+            f"DWX_Bars_{pair_name}m_M5.txt",
+            f"DWX_Bars_{pair_name}_M5.txt",
+        ]
 
         if mt4_dir and mt4_dir.exists():
-            bars_file = mt4_dir / filename
-            if not bars_file.exists():
-                alt = filename.replace("m_M5", "_M5")
-                if (mt4_dir / alt).exists():
-                    bars_file = mt4_dir / alt
+            bars_file = None
+            for cand in candidate_files:
+                p = mt4_dir / cand
+                if p.exists():
+                    bars_file = p
+                    break
 
-            if bars_file.exists():
+            if bars_file and bars_file.exists():
                 try:
                     lines = bars_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
                     for line in lines[1:]:
@@ -952,24 +1112,22 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _get_stats(self) -> Dict[str, Any]:
         """Aggregate trade statistics."""
-        db = self._get_db()
-        if db is None:
-            return {"total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0}
         try:
-            import sqlite3
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as total FROM orders WHERE status = 'FILLED'")
-            total = cursor.fetchone()["total"]
-            cursor.execute("SELECT COUNT(*) as wins FROM orders WHERE status = 'FILLED' AND pnl > 0")
-            wins = cursor.fetchone()["wins"]
-            cursor.execute("SELECT COALESCE(SUM(pnl), 0) as total_pnl FROM orders WHERE status = 'FILLED'")
-            total_pnl = cursor.fetchone()["total_pnl"]
-            conn.close()
-            losses = total - wins
-            win_rate = (wins / total * 100) if total > 0 else 0
-            return {"total_trades": total, "wins": wins, "losses": losses, "win_rate": round(win_rate, 1), "total_pnl": round(float(total_pnl), 2)}
+            trades = self._get_trades()
+            if not trades:
+                return {"total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0}
+            total = len(trades)
+            wins = sum(1 for t in trades if t.get("pnl", 0) > 0)
+            losses = sum(1 for t in trades if t.get("pnl", 0) < 0)
+            total_pnl = sum(t.get("pnl", 0) for t in trades)
+            win_rate = (wins / total * 100) if total > 0 else 0.0
+            return {
+                "total_trades": total,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(win_rate, 1),
+                "total_pnl": round(float(total_pnl), 2),
+            }
         except Exception as e:
             logger.error(f"Stats query error: {e}")
             return {"total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0}
@@ -1094,24 +1252,20 @@ def start_api_server(host: str = "127.0.0.1", port: int = 8642) -> None:
     server = create_api_server(host, port, controller, event_bus, db_path)
     logger.info(f"API Server listening on http://{host}:{port}")
 
+    # Ensure MetaTrader 4 terminal is active, then start bridge
+    try:
+        from config import load_config
+        cfg = load_config()
+        launch_mt4_terminal(getattr(cfg, "mt4_exe_path", None))
+    except Exception as e:
+        logger.warning(f"MT4 launch check warning: {e}")
+
     # Auto-start bridge on server startup
     try:
         controller.start()
         logger.info("Auto-started BridgeController on server startup.")
     except Exception as e:
         logger.warning(f"Bridge auto-start warning: {e}")
-
-    # Check and auto-launch MetaTrader 4 terminal if not running
-    try:
-        import subprocess
-        chk = subprocess.run(["tasklist", "/fi", "imagename eq terminal.exe"], capture_output=True, text=True, timeout=3)
-        if "terminal.exe" not in chk.stdout.lower():
-            mt4_path = Path(r"C:\Program Files (x86)\MetaTrader 4\terminal.exe")
-            if mt4_path.exists():
-                subprocess.Popen([str(mt4_path)], cwd=str(mt4_path.parent))
-                logger.info("Auto-launched MetaTrader 4 terminal in background.")
-    except Exception as e:
-        logger.warning(f"MT4 auto-start check warning: {e}")
 
     # Periodic status & account telemetry broadcast
     def telemetry_broadcaster():

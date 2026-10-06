@@ -3,8 +3,13 @@ Tests for the local Python REST + WebSocket API server.
 """
 
 import json
+import sys
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from api.server import EventBus, BridgeController, APIHandler, json_response
 
 
@@ -97,9 +102,47 @@ class TestAPIServerComponents(unittest.TestCase):
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertFalse(body["emergency_halt"])
 
+            # Test POST /api/mt4/launch
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/mt4/launch",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertIn("status", body)
+                self.assertIn("mt4_running", body)
+
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_mt4_process_helpers(self):
+        from unittest.mock import patch
+        from api.server import is_mt4_running, launch_mt4_terminal
+
+        # Test is_mt4_running positive
+        with patch("subprocess.check_output", return_value="terminal.exe 12345 Console 1 45,000 K"):
+            self.assertTrue(is_mt4_running())
+
+        # Test is_mt4_running negative
+        with patch("subprocess.check_output", return_value="INFO: No tasks are running which match the specified criteria."):
+            self.assertFalse(is_mt4_running())
+
+        # Test launch_mt4_terminal when already running
+        with patch("api.server.is_mt4_running", return_value=True):
+            self.assertTrue(launch_mt4_terminal())
+
+        # Test launch_mt4_terminal when not running with valid mock path
+        from pathlib import Path
+        with patch("api.server.is_mt4_running", return_value=False), \
+             patch("pathlib.Path.is_file", return_value=True), \
+             patch("os.startfile", create=True) as mock_startfile, \
+             patch("time.sleep"):
+            res = launch_mt4_terminal(custom_path=Path("C:/fake/terminal.exe"))
+            self.assertTrue(res)
 
 
 if __name__ == "__main__":

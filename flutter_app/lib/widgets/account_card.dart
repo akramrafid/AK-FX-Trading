@@ -406,6 +406,32 @@ class AccountCard extends StatelessWidget {
             label: isRunning ? 'PAUSE BRIDGE EXECUTION' : 'Start Live Trading',
           ),
 
+          if (!isRunning)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    bridge.mt4ProcessRunning ? Icons.check_circle_rounded : Icons.flash_on_rounded,
+                    size: 11,
+                    color: bridge.mt4ProcessRunning ? AppColors.accentGreen : AppColors.accentLime,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    bridge.mt4ProcessRunning ? 'MT4 ACTIVE • READY TO EXECUTE' : 'AUTONOMOUS • AUTO-OPENS MT4 IF CLOSED',
+                    style: const TextStyle(
+                      fontFamily: 'Segoe UI',
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMuted,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           const SizedBox(height: AppSpacing.sm),
 
           // ── Emergency Kill-Switch Button ────────────────────────────

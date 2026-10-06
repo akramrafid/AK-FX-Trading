@@ -79,10 +79,7 @@ class TradingProvider extends ChangeNotifier {
 
       case 'account_update':
         _account = AccountSummary.fromJson(data);
-        if (_account.orders.isNotEmpty) {
-          _trades = _account.orders;
-        }
-        notifyListeners();
+        refreshTrades();
         break;
 
       case 'order_update':
@@ -124,6 +121,14 @@ class TradingProvider extends ChangeNotifier {
         notifyListeners();
         break;
 
+      case 'system_notice':
+        final msg = data['message'] ?? '';
+        if (msg.toString().isNotEmpty) {
+          _logActivity('ℹ️ $msg');
+          notifyListeners();
+        }
+        break;
+
       case 'emergency_halt':
         final active = data['active'] == true;
         _logActivity(active ? '🛑 EMERGENCY HALT ACTIVATED' : 'Emergency Halt Cleared');
@@ -147,7 +152,11 @@ class TradingProvider extends ChangeNotifier {
 
     final acc = await api.getAccount(symbol: _activePair);
     _account = acc;
-    if (_account.orders.isNotEmpty) {
+
+    final updatedTrades = await api.getTrades();
+    if (updatedTrades.isNotEmpty) {
+      _trades = updatedTrades;
+    } else if (_account.orders.isNotEmpty) {
       _trades = _account.orders;
     }
 
@@ -196,9 +205,6 @@ class TradingProvider extends ChangeNotifier {
 
   Future<void> refreshAccount() async {
     _account = await api.getAccount(symbol: _activePair);
-    if (_account.orders.isNotEmpty) {
-      _trades = _account.orders;
-    }
     notifyListeners();
   }
 
@@ -210,11 +216,34 @@ class TradingProvider extends ChangeNotifier {
   // ── Actions ──────────────────────────────────────────────────────────
 
   Future<bool> startBridge() async {
-    _logActivity('Sending Start Bridge command...');
+    _logActivity('Checking MetaTrader 4 & Starting Live Bridge...');
+    _bridgeState = BridgeState(
+      isRunning: true,
+      symbol: _activePair,
+      mt4ProcessRunning: true,
+      mt4Connected: true,
+    );
+    notifyListeners();
+
     final ok = await api.startBridge();
     if (ok) {
-      _bridgeState = BridgeState(isRunning: true, symbol: _activePair);
+      _logActivity('Live Trading Bridge Active (MetaTrader 4 connected)');
+      Future.delayed(const Duration(milliseconds: 1500), refreshStatus);
+      Future.delayed(const Duration(milliseconds: 2500), refreshAccount);
+    } else {
+      _bridgeState = BridgeState(isRunning: false);
+      _logActivity('Failed to start bridge. Verify terminal connection.');
       notifyListeners();
+    }
+    return ok;
+  }
+
+  Future<bool> launchMt4() async {
+    _logActivity('Launching MetaTrader 4 terminal...');
+    final ok = await api.launchMt4();
+    if (ok) {
+      _logActivity('MetaTrader 4 process active.');
+      refreshStatus();
     }
     return ok;
   }

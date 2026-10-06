@@ -210,7 +210,7 @@ class ApiService {
 
   Future<bool> startBridge() async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/bridge/start')).timeout(const Duration(seconds: 5));
+      final res = await http.post(Uri.parse('$baseUrl/api/bridge/start')).timeout(const Duration(seconds: 15));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('startBridge failed: $e');
@@ -218,9 +218,19 @@ class ApiService {
     }
   }
 
+  Future<bool> launchMt4() async {
+    try {
+      final res = await http.post(Uri.parse('$baseUrl/api/mt4/launch')).timeout(const Duration(seconds: 10));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('launchMt4 failed: $e');
+      return false;
+    }
+  }
+
   Future<bool> stopBridge() async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/api/bridge/stop')).timeout(const Duration(seconds: 5));
+      final res = await http.post(Uri.parse('$baseUrl/api/bridge/stop')).timeout(const Duration(seconds: 8));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('stopBridge failed: $e');

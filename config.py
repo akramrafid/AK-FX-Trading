@@ -83,8 +83,13 @@ class AppConfig:
     telegram_chat_id: Optional[str] = None
     webhook_url: Optional[str] = None
 
+    # MT4 Terminal Executable Path
+    mt4_exe_path: Optional[Path] = None
+
     def __post_init__(self) -> None:
         self.mt4_files_dir = Path(self.mt4_files_dir).resolve()
+        if self.mt4_exe_path:
+            self.mt4_exe_path = Path(self.mt4_exe_path).resolve()
         if self.risk_pct <= 0 or self.risk_pct > Decimal("0.05"):
             raise ValueError(f"Risk % must be between 0.001 and 0.05 (got: {self.risk_pct})")
         if self.max_daily_loss_pct is not None:
@@ -148,4 +153,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         webhook_url=get_var("ALERT_WEBHOOK_URL", "") or None,
         db_enabled=get_var("DB_ENABLED", "true").lower() in ("true", "1", "yes"),
         db_path=Path(get_var("DB_PATH", "data/trading.db")),
+        mt4_exe_path=Path(get_var("MT4_EXE_PATH", r"C:\Program Files (x86)\MetaTrader 4\terminal.exe"))
+        if get_var("MT4_EXE_PATH", r"C:\Program Files (x86)\MetaTrader 4\terminal.exe").strip()
+        else None,
     )

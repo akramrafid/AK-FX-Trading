@@ -6,8 +6,9 @@ import '../models/trade_model.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
 import 'tactile_wrapper.dart';
+import 'tv_chart_view.dart';
 
-/// Interactive financial chart powered by the [financial_chart] package.
+/// Interactive financial chart powered by the [financial_chart] package and TradingView Lightweight Charts.
 /// Exclusively dedicated to EURUSD and USDCAD forex pairs with real-time MT4 feeds
 /// and rich multi-layered technical customizations.
 class TradingChart extends StatefulWidget {
@@ -19,6 +20,7 @@ class TradingChart extends StatefulWidget {
 
 class _TradingChartState extends State<TradingChart> with TickerProviderStateMixin {
   // ── Customization State ────────────────────────────────────────────────
+  bool _useTradingView = true; // Default to official TradingView Lightweight Charts!
   String _chartType = 'Candles'; // 'Candles', 'Bars', 'Line', 'Area'
   String _colorTheme = 'Classic Forex'; // 'Classic Forex', 'Cyber Neon', 'Monokai Gold'
   bool _showSMA20 = true;
@@ -503,6 +505,80 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
                 }).toList(),
               ),
 
+              // 2.5 ENGINE SWITCHER: TradingView vs Native
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.bgSurface.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: _useTradingView
+                        ? AppColors.accentCyan.withValues(alpha: 0.5)
+                        : AppColors.glassBorder,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: () => setState(() => _useTradingView = true),
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _useTradingView
+                              ? AppColors.accentCyan.withValues(alpha: 0.22)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.auto_graph_rounded,
+                              size: 13,
+                              color: _useTradingView ? AppColors.accentCyan : AppColors.textMuted,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'TradingView',
+                              style: TextStyle(
+                                fontFamily: 'Segoe UI',
+                                fontSize: 11,
+                                fontWeight: _useTradingView ? FontWeight.w700 : FontWeight.w500,
+                                color: _useTradingView ? AppColors.accentCyan : AppColors.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => setState(() => _useTradingView = false),
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: !_useTradingView
+                              ? AppColors.accentPurple.withValues(alpha: 0.22)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        child: Text(
+                          'Native',
+                          style: TextStyle(
+                            fontFamily: 'Segoe UI',
+                            fontSize: 11,
+                            fontWeight: !_useTradingView ? FontWeight.w700 : FontWeight.w500,
+                            color: !_useTradingView ? AppColors.accentPurple : AppColors.textMuted,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
               // 3. CHART TYPE CUSTOMIZER
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -705,7 +781,15 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
             ),
             child: Stack(
               children: [
-                if (_chart != null)
+                if (_useTradingView)
+                  Positioned.fill(
+                    child: TvChartPlatformWidget(
+                      key: ValueKey('tv-$activePair-$activeTf'),
+                      symbol: activePair,
+                      timeframe: activeTf,
+                    ),
+                  )
+                else if (_chart != null)
                   Positioned.fill(
                     child: GChartWidget(
                       key: ValueKey(sig),
@@ -718,17 +802,19 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
                     child: CircularProgressIndicator(color: AppColors.accentLime),
                   ),
 
-                // Strategic Buy / Sell Signals Overlay (matching design reference)
-                Positioned(
-                  left: 80,
-                  top: 50,
-                  child: _buildSignalMarker('B', AppColors.accentLime, 'BUY 0.11'),
-                ),
-                Positioned(
-                  right: 140,
-                  top: 30,
-                  child: _buildSignalMarker('S', AppColors.accentPurple, 'SELL 0.11'),
-                ),
+                // Strategic Buy / Sell Signals Overlay (rendered when Native GChart is selected)
+                if (!_useTradingView) ...[
+                  Positioned(
+                    left: 80,
+                    top: 50,
+                    child: _buildSignalMarker('B', AppColors.accentLime, 'BUY 0.11'),
+                  ),
+                  Positioned(
+                    right: 140,
+                    top: 30,
+                    child: _buildSignalMarker('S', AppColors.accentPurple, 'SELL 0.11'),
+                  ),
+                ],
               ],
             ),
           ),

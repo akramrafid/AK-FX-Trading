@@ -47,8 +47,8 @@ class TradeRecord {
         : Direction.buy;
 
     TradeStatus st;
-    final s = (json['status'] ?? 'PENDING').toString().toUpperCase();
-    if (s == 'FILLED') {
+    final s = (json['status'] ?? '').toString().toUpperCase();
+    if (s == 'FILLED' || s == 'OPEN') {
       st = TradeStatus.filled;
     } else if (s == 'REJECTED') {
       st = TradeStatus.rejected;
@@ -56,6 +56,8 @@ class TradeRecord {
       st = TradeStatus.closed;
     } else if (s == 'UNCONFIRMED') {
       st = TradeStatus.unconfirmed;
+    } else if (json['ticket'] != null && json['ticket'] != 0) {
+      st = TradeStatus.filled;
     } else {
       st = TradeStatus.pending;
     }
@@ -235,6 +237,8 @@ class BridgeState {
   final String watchdogState;
   final String watchdogMessage;
   final String strategyMode;
+  final bool mt4ProcessRunning;
+  final bool mt4Connected;
 
   BridgeState({
     this.isRunning = false,
@@ -247,6 +251,8 @@ class BridgeState {
     this.watchdogState = 'HEALTHY',
     this.watchdogMessage = 'System operational',
     this.strategyMode = 'c1_wickswap',
+    this.mt4ProcessRunning = false,
+    this.mt4Connected = false,
   });
 
   factory BridgeState.fromJson(Map<String, dynamic> json) {
@@ -262,6 +268,8 @@ class BridgeState {
       watchdogState: wd?['state'] ?? 'HEALTHY',
       watchdogMessage: wd?['message'] ?? 'System operational',
       strategyMode: json['strategy_mode'] ?? 'c1_wickswap',
+      mt4ProcessRunning: json['mt4_process_running'] == true,
+      mt4Connected: json['mt4_connected'] == true,
     );
   }
 }

@@ -42,9 +42,11 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-if exist "%APP_EXE%" goto :launch_windows_exe
+if "%1"=="--native" (
+    if exist "%APP_EXE%" goto :launch_windows_exe
+)
 
-echo [3/3] Launching AK Forex Desktop Control Desk in Web Window ...
+echo [3/3] Launching AK Forex Quant Trading Desk in Web Window ...
 
 :: Check for Edge or Chrome application window mode (frameless native desktop look)
 where msedge >nul 2>&1

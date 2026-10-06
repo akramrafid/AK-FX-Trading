@@ -165,7 +165,7 @@ class DashboardScreen extends StatelessWidget {
               ),
             ),
             SizedBox(height: AppSpacing.md),
-            Expanded(child: TransactionsTable()),
+            Expanded(child: TransactionsTable(initialSubTab: 1)),
           ],
         );
 

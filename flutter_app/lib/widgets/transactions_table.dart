@@ -7,14 +7,29 @@ import '../theme/app_theme.dart';
 import 'tactile_wrapper.dart';
 
 class TransactionsTable extends StatefulWidget {
-  const TransactionsTable({super.key});
+  final int initialSubTab;
+  const TransactionsTable({super.key, this.initialSubTab = 0});
 
   @override
   State<TransactionsTable> createState() => _TransactionsTableState();
 }
 
 class _TransactionsTableState extends State<TransactionsTable> {
-  int _selectedSubTab = 0; // 0 = Open Positions, 1 = Order History
+  late int _selectedSubTab;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSubTab = widget.initialSubTab;
+  }
+
+  @override
+  void didUpdateWidget(covariant TransactionsTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialSubTab != widget.initialSubTab) {
+      _selectedSubTab = widget.initialSubTab;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +38,7 @@ class _TransactionsTableState extends State<TransactionsTable> {
 
     // Separate open MT4 orders from historical closed orders
     final openOrders = trades.where((t) => t.status == TradeStatus.filled).toList();
-    final closedOrders = trades.where((t) => t.status == TradeStatus.closed).toList();
+    final closedOrders = trades.where((t) => t.status != TradeStatus.filled).toList();
     final displayOpenOrders = openOrders;
     final currentDisplayList = _selectedSubTab == 0 ? displayOpenOrders : closedOrders;
 
@@ -246,26 +261,34 @@ class _TransactionsTableState extends State<TransactionsTable> {
                                       decoration: BoxDecoration(
                                         color: trade.status == TradeStatus.filled
                                             ? AppColors.accentGreen
-                                            : AppColors.accentBlue,
+                                            : (trade.status == TradeStatus.rejected
+                                                ? AppColors.accentRed
+                                                : AppColors.accentBlue),
                                         shape: BoxShape.circle,
                                       ),
                                     ),
                                     const SizedBox(width: 5),
                                     Text(
-                                      trade.status == TradeStatus.filled ? 'MT4 Live Filled' : 'Closed',
+                                      trade.status == TradeStatus.filled
+                                          ? 'MT4 Live Filled'
+                                          : (trade.status == TradeStatus.rejected ? 'Rejected' : 'Closed Ledger'),
                                       style: TextStyle(
                                         fontFamily: 'Segoe UI',
                                         fontSize: 10.5,
                                         fontWeight: FontWeight.w600,
                                         color: trade.status == TradeStatus.filled
                                             ? AppColors.accentGreen
-                                            : AppColors.textSecondary,
+                                            : (trade.status == TradeStatus.rejected
+                                                ? AppColors.accentRed
+                                                : AppColors.textSecondary),
                                       ),
                                     ),
                                   ],
                                 ),
                                 Text(
-                                  'Opened ${timeFormat.format(trade.createdAt)}',
+                                  trade.status == TradeStatus.filled
+                                      ? 'Opened ${timeFormat.format(trade.createdAt)}'
+                                      : 'Recorded ${DateFormat('MM/dd HH:mm').format(trade.createdAt)}',
                                   style: const TextStyle(
                                     fontFamily: 'Segoe UI',
                                     fontSize: 9.5,
