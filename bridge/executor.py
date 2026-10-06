@@ -67,6 +67,7 @@ class ActiveBridgeTrade:
     partial_banked: bool = False
     breakeven_set: bool = False
     partial_bank_pct: Optional[Decimal] = Decimal("0.70")
+    breakeven_trigger_r: Optional[Decimal] = Decimal("2.0")
 
 
 @dataclass
@@ -160,7 +161,8 @@ class BridgeExecutor:
                 favorable_price = Decimal(str(current_bar.low))
                 cur_r = (trade.entry_price - favorable_price) / (trade.risk_pips * pip_size) if trade.risk_pips > 0 else Decimal("0")
 
-            if cur_r >= Decimal("2.0"):
+            be_target_r = trade.breakeven_trigger_r if trade.breakeven_trigger_r is not None else Decimal("2.0")
+            if cur_r >= be_target_r:
                 # Milestone 1: Bank partial profits if configured (> 0)
                 if not trade.partial_banked and trade.partial_bank_pct and trade.partial_bank_pct > Decimal("0"):
                     close_lots = (trade.lots * trade.partial_bank_pct).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
@@ -171,37 +173,36 @@ class BridgeExecutor:
                             trade.lots -= close_lots
                             logger.info(
                                 f"[{self.symbol}] Milestone 1: Banked {trade.partial_bank_pct * Decimal('100'):.0f}% partial ({close_lots} lots) "
-                                f"on ticket {ticket} at +2.0R (reached {cur_r:.2f}R)"
+                                f"on ticket {ticket} at 1:2 RR (reached {cur_r:.2f}R)"
                             )
                             if self.db is not None:
                                 self.db.log_audit_event(
                                     "PARTIAL_CLOSE",
                                     "executor",
-                                    f"Ticket {ticket}: closed {close_lots} lots at +2.0R",
+                                    f"Ticket {ticket}: closed {close_lots} lots at 1:2 RR",
                                 )
                         except Exception as e:
                             logger.error(f"Failed to send partial close for ticket {ticket}: {e}")
 
-                # Milestone 2: Advance Stop Loss to Breakeven (+ 0.5 pip buffer)
+                # Milestone 2: Advance Stop Loss strictly to Entry (Breakeven)
                 if not trade.breakeven_set:
-                    buffer = Decimal("0.00005") if "JPY" not in self.symbol.upper() else Decimal("0.005")
-                    new_sl = (trade.entry_price + buffer) if trade.direction == Direction.BUY else (trade.entry_price - buffer)
+                    new_sl = trade.entry_price
                     try:
                         self.dwx_client.send_modify(ticket=ticket, sl=new_sl, tp=trade.tp_price, symbol=self.symbol)
                         trade.breakeven_set = True
                         trade.sl_price = new_sl
                         logger.info(
-                            f"[{self.symbol}] Milestone 2: Moved SL to Breakeven ({new_sl}) "
-                            f"on ticket {ticket} at +2.0R"
+                            f"[{self.symbol}] Milestone 2: Moved SL strictly to Entry ({new_sl}) "
+                            f"on ticket {ticket} at 1:2 RR (reached {cur_r:.2f}R)"
                         )
                         if self.db is not None:
                             self.db.log_audit_event(
                                 "BREAKEVEN_ADVANCE",
                                 "executor",
-                                f"Ticket {ticket}: SL moved to {new_sl}",
+                                f"Ticket {ticket}: SL moved to entry {new_sl}",
                             )
                     except Exception as e:
-                        logger.error(f"Failed to advance SL to breakeven for ticket {ticket}: {e}")
+                        logger.error(f"Failed to advance SL to entry for ticket {ticket}: {e}")
 
     def step_multitimeframe(
         self,
@@ -578,6 +579,7 @@ class BridgeExecutor:
                 logger.info(f"Order FILLED: Ticket {record.ticket} at {record.fill_price}")
                 if report.ticket is not None:
                     p_pct = Decimal(str(signal.partial_bank_pct)) if (signal.partial_bank_pct is not None) else Decimal("0.0")
+                    be_r = Decimal(str(signal.breakeven_trigger_r)) if (signal.breakeven_trigger_r is not None) else Decimal("2.0")
                     self.active_trades[report.ticket] = ActiveBridgeTrade(
                         ticket=report.ticket,
                         magic=magic,
@@ -589,6 +591,7 @@ class BridgeExecutor:
                         lots=sizing.lots,
                         risk_pips=stop_pips,
                         partial_bank_pct=p_pct,
+                        breakeven_trigger_r=be_r,
                     )
                 if self.db is not None and record.ticket is not None:
                     try:

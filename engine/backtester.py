@@ -57,6 +57,28 @@ class BacktestConfig:
         defaults.update(kwargs)
         return cls(**defaults)
 
+    @classmethod
+    def c1_wickswap_preset(cls, **kwargs) -> BacktestConfig:
+        """C1 Wick-Swap strategy configuration (1:5 R:R, breakeven at 1:2 R:R strictly to entry)."""
+        defaults = {
+            "initial_balance": 10000.0,
+            "risk_pct": 1.0,
+            "spread_pips": 0.0,
+            "slippage_pips": 0.0,
+            "pip_size": 0.0001,
+            "pip_value_per_lot": 10.0,
+            "max_concurrent_trades": 1,
+            "min_lot": 0.01,
+            "max_lot": 50.0,
+            "assume_worst_case_intrabar": True,
+            "breakeven_trigger_r": 2.0,
+            "breakeven_buffer_pips": 0.0,
+            "partial_bank_trigger_r": None,
+            "partial_bank_pct": 0.0,
+        }
+        defaults.update(kwargs)
+        return cls(**defaults)
+
 
 @dataclass
 class BacktestTrade:
@@ -154,6 +176,20 @@ class BacktestEngine:
         rule_kwargs = {k: v for k, v in kwargs.items() if hasattr(RuleEngine, k)}
         cfg = config or BacktestConfig.institutional_preset(**config_kwargs)
         re = rule_engine or RuleEngine.institutional_preset(spread_pips=cfg.spread_pips, **rule_kwargs)
+        return cls(config=cfg, rule_engine=re)
+
+    @classmethod
+    def c1_wickswap_preset(
+        cls,
+        config: Optional[BacktestConfig] = None,
+        rule_engine: Optional[RuleEngine] = None,
+        **kwargs,
+    ) -> BacktestEngine:
+        """Factory constructor for C1 Wick-Swap strategy backtester."""
+        config_kwargs = {k: v for k, v in kwargs.items() if hasattr(BacktestConfig, k)}
+        rule_kwargs = {k: v for k, v in kwargs.items() if hasattr(RuleEngine, k)}
+        cfg = config or BacktestConfig.c1_wickswap_preset(**config_kwargs)
+        re = rule_engine or RuleEngine.c1_wickswap_preset(spread_pips=cfg.spread_pips, **rule_kwargs)
         return cls(config=cfg, rule_engine=re)
 
     def calculate_lot_size(self, balance: float, risk_distance: float) -> float:

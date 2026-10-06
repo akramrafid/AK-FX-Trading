@@ -27,7 +27,7 @@ from bridge.dwx_client import (
     OrderType,
     TradeCommand,
 )
-from bridge.executor import BridgeExecutor, generate_mt4_magic_number
+from bridge.executor import ActiveBridgeTrade, BridgeExecutor, generate_mt4_magic_number
 from bridge.sizing import PositionSizer, SizingResult
 from engine.models import Candle, Direction
 
@@ -419,6 +419,86 @@ class TestBridgeExecutor(unittest.TestCase):
         risk = record.sl_price - record.entry_price
         reward = record.entry_price - record.tp_price
         self.assertEqual(reward, risk * Decimal("5"))
+
+    def test_manage_active_trades_breakeven_at_1_to_2_rr_moves_sl_strictly_to_entry(self) -> None:
+        """
+        When profit reaches 1:2 RR (+2.0R), SL must be moved strictly to the exact entry price.
+        """
+        # Test BUY trade:
+        # Entry = 1.08500, SL = 1.08300 (risk = 20 pips = 0.00200)
+        # 1:2 RR target = 1.08500 + 2 * 0.00200 = 1.08900
+        buy_trade = ActiveBridgeTrade(
+            ticket=1001,
+            magic=99901,
+            symbol="EURUSD",
+            direction=Direction.BUY,
+            entry_price=Decimal("1.08500"),
+            sl_price=Decimal("1.08300"),
+            tp_price=Decimal("1.09500"),
+            lots=Decimal("0.50"),
+            risk_pips=Decimal("20.0"),
+            partial_bank_pct=Decimal("0.0"),
+            breakeven_trigger_r=Decimal("2.0"),
+        )
+        self.executor.active_trades[1001] = buy_trade
+
+        # Bar 1: High only reaches 1.08700 (+1.0R) -> BE not triggered
+        bar_sub_2r = Candle(
+            timestamp=datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc),
+            open=1.0855, high=1.0870, low=1.0850, close=1.0865, volume=50.0
+        )
+        self.executor._manage_active_trades(bar_sub_2r)
+        self.assertFalse(buy_trade.breakeven_set)
+        self.assertEqual(buy_trade.sl_price, Decimal("1.08300"))
+
+        # Bar 2: High reaches 1.08910 (+2.05R, > 1:2 RR) -> BE triggered!
+        bar_2r = Candle(
+            timestamp=datetime(2026, 9, 24, 10, 1, tzinfo=timezone.utc),
+            open=1.0865, high=1.0891, low=1.0860, close=1.0885, volume=50.0
+        )
+        self.executor._manage_active_trades(bar_2r)
+        self.assertTrue(buy_trade.breakeven_set)
+        # SL must be strictly at the exact entry price!
+        self.assertEqual(buy_trade.sl_price, buy_trade.entry_price)
+        self.assertEqual(buy_trade.sl_price, Decimal("1.08500"))
+
+        # Verify MODIFY command dispatched to DWX_Commands.txt
+        cmds_content = self.client.atomic_read(self.client.commands_file)
+        lines = [line for line in cmds_content.splitlines() if line.strip()]
+        self.assertGreater(len(lines), 0)
+        last_cmd = json.loads(lines[-1])
+        self.assertEqual(last_cmd["action"], "MODIFY")
+        self.assertEqual(last_cmd["ticket"], 1001)
+        self.assertEqual(Decimal(str(last_cmd["sl"])), Decimal("1.08500"))
+
+        # Test SELL trade:
+        # Entry = 1.08500, SL = 1.08800 (risk = 30 pips = 0.00300)
+        # 1:2 RR target = 1.08500 - 2 * 0.00300 = 1.07900
+        sell_trade = ActiveBridgeTrade(
+            ticket=1002,
+            magic=99902,
+            symbol="EURUSD",
+            direction=Direction.SELL,
+            entry_price=Decimal("1.08500"),
+            sl_price=Decimal("1.08800"),
+            tp_price=Decimal("1.07000"),
+            lots=Decimal("0.50"),
+            risk_pips=Decimal("30.0"),
+            partial_bank_pct=Decimal("0.0"),
+            breakeven_trigger_r=Decimal("2.0"),
+        )
+        self.executor.active_trades[1002] = sell_trade
+
+        # Bar 3: Low reaches 1.07890 (+2.03R, > 1:2 RR) -> BE triggered!
+        bar_sell_2r = Candle(
+            timestamp=datetime(2026, 9, 24, 10, 2, tzinfo=timezone.utc),
+            open=1.0820, high=1.0825, low=1.0789, close=1.0795, volume=50.0
+        )
+        self.executor._manage_active_trades(bar_sell_2r)
+        self.assertTrue(sell_trade.breakeven_set)
+        # SL must be strictly at the exact entry price!
+        self.assertEqual(sell_trade.sl_price, sell_trade.entry_price)
+        self.assertEqual(sell_trade.sl_price, Decimal("1.08500"))
 
 
 if __name__ == "__main__":

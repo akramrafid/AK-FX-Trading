@@ -183,6 +183,8 @@ class RuleEngine:
         session_filter: bool = True,
         session_start_hour: int = 7,
         session_end_hour: int = 21,
+        check_m5: bool = True,
+        check_m15: bool = True,
         **kwargs,
     ) -> RuleEngine:
         """
@@ -208,6 +210,8 @@ class RuleEngine:
             session_filter=session_filter,
             session_start_hour=session_start_hour,
             session_end_hour=session_end_hour,
+            check_m5=check_m5,
+            check_m15=check_m15,
             **kwargs,
         )
 
@@ -218,10 +222,10 @@ class RuleEngine:
         allow_variant_a: bool = True,
         allow_variant_b: bool = False,
         anchor_to_key_liquidity: bool = False,
-        use_sweep_wick_sl: bool = True,
+        use_sweep_wick_sl: bool = False,
         use_c1_only_sl: bool = False,
         min_sweep_pips: float = 0.0,
-        min_risk_pips: float = 1.0,
+        min_risk_pips: float = 0.0,
         min_displacement_ratio: float = 0.0,
         h1_trend_filter: bool = False,
         disarm_on_break: bool = False,
@@ -232,17 +236,19 @@ class RuleEngine:
         session_filter: bool = True,
         session_start_hour: int = 7,
         session_end_hour: int = 21,
-        buffer_pips: float = 0.5,
-        spread_pips: float = 0.5,
+        buffer_pips: float = 0.0,
+        spread_pips: float = 0.0,
+        check_m5: bool = True,
+        check_m15: bool = True,
         **kwargs,
     ) -> RuleEngine:
         """
         Factory constructor for C1 Wick-Swap strategy:
-        - M5/M15 candle-to-candle wick sweep (Variant A).
+        - M5/M15 candle-to-candle wick sweep (Variant A, both BUY and SELL).
         - 1-minute 3-consecutive directional candle confirmation.
-        - Stop-Loss anchored strictly to the extreme sweep wick (with buffer/spread).
+        - Stop-Loss anchored strictly to the top (SELL) or bottom (BUY) of the 3 consecutive 1-minute candles.
         - Fixed 1:5 Reward-to-Risk ratio.
-        - Breakeven: At +2.0R, move SL to entry (no partial close, 100% position runs to +5.0R).
+        - Breakeven: At 1:2 RR (+2.0R), move SL strictly to entry price.
         """
         return cls(
             symbol=symbol,
@@ -265,6 +271,8 @@ class RuleEngine:
             session_end_hour=session_end_hour,
             buffer_pips=buffer_pips,
             spread_pips=spread_pips,
+            check_m5=check_m5,
+            check_m15=check_m15,
             **kwargs,
         )
 
@@ -388,6 +396,16 @@ class RuleEngine:
             self.on_h1_candle(candle)
             return None
 
+        if tf in ("M5", "5M", "5"):
+            tf = "M5"
+        elif tf in ("M15", "15M", "15"):
+            tf = "M15"
+
+        if tf == "M5" and not self.check_m5:
+            return None
+        if tf == "M15" and not self.check_m15:
+            return None
+
         history = self._htf_history.setdefault(tf, [])
         in_session = True
         if self.session_filter:
@@ -412,7 +430,7 @@ class RuleEngine:
             else:
                 # Standard Variant A: Candle-to-Candle liquidity sweep of prior opposite candle
                 if self.allow_variant_a:
-                    if prev.is_bearish and candle.is_bullish:
+                    if prev.is_bearish and (candle.is_bullish or candle.close >= candle.open):
                         if candle.low < prev.low and candle.close >= prev.low:
                             sweep_event = SweepEvent(
                                 sweep_type=SweepType.VARIANT_A,
@@ -422,7 +440,7 @@ class RuleEngine:
                                 swept_level=prev.low,
                                 extreme_price=candle.low,
                             )
-                    elif prev.is_bullish and candle.is_bearish:
+                    elif prev.is_bullish and (candle.is_bearish or candle.close <= candle.open):
                         if candle.high > prev.high and candle.close <= prev.high:
                             sweep_event = SweepEvent(
                                 sweep_type=SweepType.VARIANT_A,
@@ -452,14 +470,16 @@ class RuleEngine:
                     sweep_event = None
 
             if sweep_event is not None:
-                self.arm(
-                    direction=sweep_event.direction,
-                    sweep_candle=candle,
-                    sweep_timeframe=tf,
-                    swept_level=sweep_event.swept_level,
-                    extreme_price=sweep_event.extreme_price,
-                    sweep_type=sweep_event.sweep_type.value if hasattr(sweep_event.sweep_type, "value") else str(sweep_event.sweep_type),
-                )
+                # Priority protection: Do not overwrite an active M15 armed setup with a lower timeframe (M5) sweep
+                if not (self.is_armed and self.armed_state.sweep_timeframe == "M15" and tf == "M5"):
+                    self.arm(
+                        direction=sweep_event.direction,
+                        sweep_candle=candle,
+                        sweep_timeframe=tf,
+                        swept_level=sweep_event.swept_level,
+                        extreme_price=sweep_event.extreme_price,
+                        sweep_type=sweep_event.sweep_type.value if hasattr(sweep_event.sweep_type, "value") else str(sweep_event.sweep_type),
+                    )
 
         history.append(candle)
         if len(history) > 100:
