@@ -251,8 +251,8 @@ class DWXClient:
         backoff = self.initial_backoff_ms / 1000.0
         for attempt in range(self.max_retries):
             try:
-                with open(target_path, "r", encoding="utf-8") as f:
-                    return f.read()
+                with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                    return f.read().replace("\x00", "")
             except (PermissionError, BlockingIOError, OSError) as e:
                 if attempt == self.max_retries - 1:
                     logger.error(f"Failed to read {target_path} after {self.max_retries} attempts: {e}")

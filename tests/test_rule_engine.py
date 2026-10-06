@@ -312,26 +312,27 @@ class TestC1WickSwapStrategy(unittest.TestCase):
     Unit tests for the C1 Wick-Swap strategy:
     - M5/M15 candle-to-candle wick sweep (Variant A).
     - 3-consecutive M1 candle confirmation.
-    - Stop Loss strictly anchored to Candle 1 (C1 low for BUY, C1 high for SELL).
+    - Stop Loss strictly anchored to the sweep candle's extreme wick.
     - 1:5 Reward-to-Risk ratio.
     - Breakeven advance at +2.0R with no partial close (100% position runs to +5.0R).
     """
 
     def test_preset_configuration(self):
         engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD")
-        self.assertTrue(engine.use_c1_only_sl)
-        self.assertFalse(engine.use_sweep_wick_sl)
+        self.assertFalse(engine.use_c1_only_sl)
+        self.assertTrue(engine.use_sweep_wick_sl)
         self.assertFalse(engine.anchor_to_key_liquidity)
         self.assertTrue(engine.allow_variant_a)
         self.assertFalse(engine.allow_variant_b)
         self.assertEqual(engine.reward_risk_ratio, 5.0)
         self.assertEqual(engine.breakeven_trigger_r, 2.0)
         self.assertEqual(engine.partial_bank_pct, 0.0)
-        self.assertTrue(engine.h1_trend_filter)
+        self.assertFalse(engine.h1_trend_filter)
+        self.assertFalse(engine.disarm_on_break)
 
     def test_c1_wickswap_buy_setup(self):
         t0 = datetime(2026, 10, 5, 8, 0, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, h1_trend_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
 
         # M5 bar 0: Bearish
         m5_0 = Candle(timestamp=t0, open=1.0880, high=1.0890, low=1.0840, close=1.0850)
@@ -356,8 +357,8 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         self.assertEqual(signal.direction, "BUY")
         self.assertEqual(signal.entry_price, 1.0880)
 
-        # SL strictly below C1 low minus buffer (1.0850 - 0.00005 = 1.08495)
-        expected_sl = 1.0850 - (0.5 * 0.0001)
+        # SL anchored to sweep wick extreme low (1.0830 - 0.00005 buffer = 1.08295)
+        expected_sl = 1.0830 - (0.5 * 0.0001)
         self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
 
         # 1:5 Reward-to-Risk ratio
@@ -370,7 +371,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
 
     def test_c1_wickswap_sell_setup(self):
         t0 = datetime(2026, 10, 5, 8, 0, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, h1_trend_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
 
         # M5 bar 0: Bullish
         m5_0 = Candle(timestamp=t0, open=1.0850, high=1.0890, low=1.0840, close=1.0880)
@@ -395,8 +396,8 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         self.assertEqual(signal.direction, "SELL")
         self.assertEqual(signal.entry_price, 1.0848)
 
-        # SL strictly top of C1 high plus spread & buffer (1.0880 + 0.00005 + 0.00005 = 1.08810)
-        expected_sl = 1.0880 + (0.5 * 0.0001) + (0.5 * 0.0001)
+        # SL anchored to sweep wick extreme high plus spread & buffer (1.0905 + 0.00005 + 0.00005 = 1.09060)
+        expected_sl = 1.0905 + (0.5 * 0.0001) + (0.5 * 0.0001)
         self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
 
         # 1:5 Reward-to-Risk ratio
@@ -404,6 +405,60 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         expected_tp = signal.entry_price - (5.0 * risk)
         self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
         self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+    def test_m15_bullish_wick_sweep_by_bearish_candle_live_trade(self):
+        """
+        Exact test reproducing user's reference images:
+        - Timeframe: M15
+        - Image 1: Bullish candle's wick swept by bearish candle (Variant A).
+        - Image 2: M1 3 consecutive bearish candles -> SELL entry at close of 3rd candle.
+        - Stop Loss placed at the extreme high of the 15M sweep wick.
+        - Prior non-matching M1 bar does NOT disarm the setup prematurely.
+        """
+        t0 = datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False)
+
+        # M15 Candle 0: Bullish (open 1.4020, high 1.4032, low 1.4015, close 1.4030)
+        c0 = Candle(timestamp=t0, open=1.4020, high=1.4032, low=1.4015, close=1.4030)
+        engine.on_htf_candle(c0, timeframe="M15")
+
+        # M15 Candle 1: Bearish sweeping Candle 0 wick (high 1.4036 > 1.4032, close 1.4028 <= 1.4032)
+        c1 = Candle(timestamp=t0 + timedelta(minutes=15), open=1.4030, high=1.4036, low=1.4025, close=1.4028)
+        armed = engine.on_htf_candle(c1, timeframe="M15")
+        self.assertIsNotNone(armed)
+        self.assertEqual(armed.direction, Direction.SELL)
+        self.assertEqual(armed.extreme_price, 1.4036)
+
+        # Sweep closes at 14:30.
+        # Suppose first M1 candle at 14:30 is slightly bullish (green candle) - should NOT disarm!
+        m1_noise = Candle(timestamp=t0 + timedelta(minutes=30), open=1.4028, high=1.4030, low=1.4027, close=1.4029)
+        self.assertIsNone(engine.on_m1_candle(m1_noise))
+        self.assertTrue(engine.is_armed, "Engine must stay armed during 15-candle window even if an opposite bar appears")
+
+        # Next 3 M1 candles are consecutive bearish:
+        # Candle 1: 14:31
+        m1_1 = Candle(timestamp=t0 + timedelta(minutes=31), open=1.4029, high=1.4031, low=1.4024, close=1.4025)
+        # Candle 2: 14:32
+        m1_2 = Candle(timestamp=t0 + timedelta(minutes=32), open=1.4025, high=1.4026, low=1.4020, close=1.4021)
+        # Candle 3: 14:33
+        m1_3 = Candle(timestamp=t0 + timedelta(minutes=33), open=1.4021, high=1.4022, low=1.4016, close=1.4017)
+
+        self.assertIsNone(engine.on_m1_candle(m1_1))
+        self.assertIsNone(engine.on_m1_candle(m1_2))
+        signal = engine.on_m1_candle(m1_3)
+
+        self.assertIsNotNone(signal, "Must generate SELL signal on close of 3rd consecutive bearish candle")
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.4017)
+
+        # Stop loss anchored to 15m sweep high (1.4036) + spread (0.5 pip) + buffer (0.5 pip)
+        expected_sl = 1.4036 + (0.5 * 0.0001) + (0.5 * 0.0001)
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # Risk = 1.4037 - 1.4017 = 0.0020 (20 pips), Reward = 5 * 20 pips = 100 pips
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+        expected_tp = signal.entry_price - (5.0 * (signal.stop_loss - signal.entry_price))
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
 
 
 if __name__ == "__main__":

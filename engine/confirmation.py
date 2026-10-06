@@ -65,7 +65,8 @@ def evaluate_3_candles(
             return None
         entry_price = c3.close
         if use_sweep_wick_sl and sweep_extreme_price is not None:
-            stop_loss = sweep_extreme_price - buffer_price
+            lowest_low = min(sweep_extreme_price, c1.low, c2.low, c3.low)
+            stop_loss = lowest_low - buffer_price
         else:
             lowest_low = c1.low if use_c1_only_sl else min(c1.low, c2.low, c3.low)
             stop_loss = lowest_low - buffer_price
@@ -108,7 +109,8 @@ def evaluate_3_candles(
             return None
         entry_price = c3.close
         if use_sweep_wick_sl and sweep_extreme_price is not None:
-            stop_loss = sweep_extreme_price + spread_price + buffer_price
+            highest_high = max(sweep_extreme_price, c1.high, c2.high, c3.high)
+            stop_loss = highest_high + spread_price + buffer_price
         else:
             highest_high = c1.high if use_c1_only_sl else max(c1.high, c2.high, c3.high)
             stop_loss = highest_high + spread_price + buffer_price

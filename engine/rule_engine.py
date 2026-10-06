@@ -218,12 +218,13 @@ class RuleEngine:
         allow_variant_a: bool = True,
         allow_variant_b: bool = False,
         anchor_to_key_liquidity: bool = False,
-        use_sweep_wick_sl: bool = False,
-        use_c1_only_sl: bool = True,
+        use_sweep_wick_sl: bool = True,
+        use_c1_only_sl: bool = False,
         min_sweep_pips: float = 0.0,
         min_risk_pips: float = 1.0,
         min_displacement_ratio: float = 0.0,
-        h1_trend_filter: bool = True,
+        h1_trend_filter: bool = False,
+        disarm_on_break: bool = False,
         reward_risk_ratio: float = 5.0,
         partial_bank_r: Optional[float] = None,
         partial_bank_pct: Optional[float] = 0.0,
@@ -239,10 +240,9 @@ class RuleEngine:
         Factory constructor for C1 Wick-Swap strategy:
         - M5/M15 candle-to-candle wick sweep (Variant A).
         - 1-minute 3-consecutive directional candle confirmation.
-        - Stop-Loss anchored strictly to Candle 1 (below low for Buy, top of high for Sell + spread/buffer).
+        - Stop-Loss anchored strictly to the extreme sweep wick (with buffer/spread).
         - Fixed 1:5 Reward-to-Risk ratio.
         - Breakeven: At +2.0R, move SL to entry (no partial close, 100% position runs to +5.0R).
-        - Higher timeframe trend alignment (H1 50 EMA filter).
         """
         return cls(
             symbol=symbol,
@@ -255,6 +255,7 @@ class RuleEngine:
             min_risk_pips=min_risk_pips,
             min_displacement_ratio=min_displacement_ratio,
             h1_trend_filter=h1_trend_filter,
+            disarm_on_break=disarm_on_break,
             reward_risk_ratio=reward_risk_ratio,
             partial_bank_r=partial_bank_r,
             partial_bank_pct=partial_bank_pct,

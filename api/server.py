@@ -474,10 +474,16 @@ class BridgeController:
 
                 self._bridges = []
                 for sym in symbols:
+                    strat_mode = getattr(cfg, "strategy_mode", "c1_wickswap").lower()
+                    if strat_mode in ("c1_wickswap", "c1", "wickswap"):
+                        engine = RuleEngine.c1_wickswap_preset(symbol=sym)
+                    else:
+                        engine = RuleEngine.institutional_preset(symbol=sym)
+
                     b = BridgeExecutor(
                         symbol=sym,
                         dwx_client=dwx,
-                        rule_engine=RuleEngine.institutional_preset(symbol=sym),
+                        rule_engine=engine,
                         position_sizer=sizer,
                         risk_guardrails=guardrails,
                         watchdog=watchdog,
