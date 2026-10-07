@@ -1,11 +1,11 @@
 """
-Confirmation and Risk-Reward (10:1) Calculator for AK Forex Trading System.
+Confirmation and Risk-Reward (5:1) Calculator for AK Forex Trading System.
 
 Evaluates the 3 closed candles following a qualifying liquidity sweep:
 - Confirms 3 consecutive candles in trade direction (all green for BUY, all red for SELL).
 - Entry: Close of candle 3.
-- Stop-Loss: Beyond the extreme of candle 1 (below low for BUY, above high + spread for SELL).
-- Take-Profit: Fixed 10x stop-loss distance (10:1 R:R).
+- Stop-Loss: Lowest low (BUY) / Highest high + spread (SELL) across confirming candles.
+- Take-Profit: Fixed 5x stop-loss distance (5:1 R:R).
 """
 
 from __future__ import annotations

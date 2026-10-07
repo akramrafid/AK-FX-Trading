@@ -265,18 +265,13 @@ class BridgeExecutor:
             self.watchdog.record_bar_received(m1_bars[-1].timestamp + m1_delta)
 
         if self.last_processed_m1_time is None:
-            if self.rule_engine.is_armed and self.rule_engine.armed_state is not None:
-                tf_mins = 15 if self.rule_engine.armed_state.sweep_timeframe == "M15" else 5
-                sweep_close_time = self.rule_engine.armed_state.sweep_candle.timestamp + timedelta(minutes=tf_mins)
-                new_m1 = [c for c in m1_bars if c.timestamp >= sweep_close_time]
-            else:
-                for b in m1_bars[-20:]:
-                    self.rule_engine._m1_body_sum += b.body
-                    self.rule_engine._m1_body_count += 1
-                new_m1 = []
+            for b in m1_bars[-20:]:
+                self.rule_engine._m1_body_sum += b.body
+                self.rule_engine._m1_body_count += 1
             self.last_processed_m1_time = m1_bars[-1].timestamp
-        else:
-            new_m1 = [c for c in m1_bars if c.timestamp > self.last_processed_m1_time]
+            return None
+
+        new_m1 = [c for c in m1_bars if c.timestamp > self.last_processed_m1_time]
 
         if not new_m1:
             return None

@@ -142,6 +142,7 @@ class ArmedState:
     candles_watched: int = 0
     max_watch_candles: int = 15  # As confirmed by user
     confirming_candles: List[Candle] = field(default_factory=list)
+    is_intrabar: bool = False
 
     @property
     def is_expired(self) -> bool:

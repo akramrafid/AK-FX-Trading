@@ -100,8 +100,8 @@ def run_3yr_backtest():
 
 ## 3. Analysis & Key Takeaways
 
-1. **Expectancy with 10:1 Asymmetry:** With a fixed 10:1 reward-to-risk ratio, even a conservative win rate of 15%–25% produces substantial positive mathematical expectancy (`Average R > 0.5R`).
-2. **Drawdown & Loss Streak Control:** The longest losing streak observed and maximum drawdown remained within risk tolerances.
+1. **Expectancy with 5:1 Asymmetry:** With a fixed 5:1 reward-to-risk ratio, the theoretical break-even win rate is 16.67%. Unfiltered mechanical execution with realistic frictions achieved 12.77% win rate, highlighting the importance of Phase 4 session and risk filters.
+2. **Drawdown & Loss Streak Control:** Without session timing and risk filters, raw execution produced a 51-trade losing streak. Phase 4 risk guardrails and circuit breakers are non-negotiable.
 3. **Execution Readiness:** The deterministic rule engine completed over 1.13 million M1 bars and 300,000 HTF bars in {run_time:.2f} seconds with zero exceptions or race conditions.
 """
 

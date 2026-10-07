@@ -418,14 +418,17 @@ class AccountCard extends StatelessWidget {
                     color: bridge.mt4ProcessRunning ? AppColors.accentGreen : AppColors.accentLime,
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    bridge.mt4ProcessRunning ? 'MT4 ACTIVE • READY TO EXECUTE' : 'AUTONOMOUS • AUTO-OPENS MT4 IF CLOSED',
-                    style: const TextStyle(
-                      fontFamily: 'Segoe UI',
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textMuted,
-                      letterSpacing: 0.8,
+                  Flexible(
+                    child: Text(
+                      bridge.mt4ProcessRunning ? 'MT4 ACTIVE • READY TO EXECUTE' : 'AUTONOMOUS • AUTO-OPENS MT4 IF CLOSED',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Segoe UI',
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.8,
+                      ),
                     ),
                   ),
                 ],

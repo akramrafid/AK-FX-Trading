@@ -643,6 +643,75 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         self.assertIsNone(eng_no_m15.on_htf_candle(c15_1, "M15"))
         self.assertFalse(eng_no_m15.is_armed)
 
+    def test_m15_intrabar_wick_sweep_with_3_confirming_m1_candles_user_setup(self):
+        """
+        Exact user TradingView setup:
+        - 15-minute timeframe: Prior 15m candle is bullish with high 1.11900.
+        - Next 15m candle (14:45-15:00) is actively forming.
+        - At 14:46, 1-minute candle pierces prior 15m high, reaching 1.11956 (intrabar wick sweep).
+        - 3 consecutive confirming 1-minute bearish candles form at 14:47, 14:48, 14:49.
+        - Order enters at 14:49 close (intrabar, BEFORE 15:00 15m candle closes).
+        - Stop-Loss is strictly at the highest high among the 3 confirming 1-minute candles.
+        - Take-Profit is strictly at 1:5 Reward-to-Risk ratio.
+        - No duplicate trades occur when the 15m candle closes at 15:00.
+        """
+        t0 = datetime(2026, 10, 6, 14, 30, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+
+        # 1. Prior 15m candle (14:30): Bullish (high 1.11900)
+        m15_prev = Candle(timestamp=t0, open=1.11800, high=1.11900, low=1.11780, close=1.11880)
+        engine.on_htf_candle(m15_prev, timeframe="M15")
+
+        # 2. 14:45 M1 bar (open of next 15m candle period)
+        t_m15 = t0 + timedelta(minutes=15)  # 14:45
+        m1_0 = Candle(timestamp=t_m15, open=1.11880, high=1.11895, low=1.11870, close=1.11890)
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+        self.assertFalse(engine.is_armed)
+
+        # 3. 14:46 M1 bar spikes above 1.11900 to 1.11956 (intrabar wick sweep!)
+        m1_sweep = Candle(timestamp=t_m15 + timedelta(minutes=1), open=1.11890, high=1.11956, low=1.11885, close=1.11940)
+        self.assertIsNone(engine.on_m1_candle(m1_sweep))
+        self.assertTrue(engine.is_armed, "Must arm immediately intrabar upon sweeping prior M15 high")
+        self.assertEqual(engine.armed_state.direction, Direction.SELL)
+        self.assertEqual(engine.armed_state.extreme_price, 1.11956)
+        self.assertTrue(engine.armed_state.is_intrabar)
+
+        # 4. Three consecutive confirming bearish 1-minute candles (14:47, 14:48, 14:49)
+        m1_c1 = Candle(timestamp=t_m15 + timedelta(minutes=2), open=1.11940, high=1.11945, low=1.11890, close=1.11900)
+        m1_c2 = Candle(timestamp=t_m15 + timedelta(minutes=3), open=1.11900, high=1.11910, low=1.11850, close=1.11860)
+        m1_c3 = Candle(timestamp=t_m15 + timedelta(minutes=4), open=1.11860, high=1.11870, low=1.11800, close=1.11810)
+
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+        signal = engine.on_m1_candle(m1_c3)
+
+        self.assertIsNotNone(signal, "Must trigger SELL signal at 14:49 on close of 3rd confirming candle")
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.11810)
+
+        # Stop-Loss must be strictly max(c1.high, c2.high, c3.high) = 1.11945
+        expected_sl = 1.11945
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # 1:5 Reward-to-Risk ratio:
+        # Risk = 1.11945 - 1.11810 = 0.00135 (13.5 pips)
+        # Reward = 5 * 0.00135 = 0.00675
+        # TP = 1.11810 - 0.00675 = 1.11135
+        risk = signal.stop_loss - signal.entry_price
+        expected_tp = signal.entry_price - (5.0 * risk)
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+        # 5. Subsequent M1 bars up to 15:00 do not trigger duplicate trades
+        for i in range(5, 15):
+            m1_next = Candle(timestamp=t_m15 + timedelta(minutes=i), open=1.11810, high=1.11820, low=1.11790, close=1.11800)
+            self.assertIsNone(engine.on_m1_candle(m1_next))
+
+        # 6. When the 14:45 15m candle finishes and closes at 15:00, verify it does NOT re-arm
+        m15_completed = Candle(timestamp=t_m15, open=1.11880, high=1.11956, low=1.11790, close=1.11800)
+        self.assertIsNone(engine.on_htf_candle(m15_completed, timeframe="M15"), "Must not re-arm already traded M15 sweep")
+        self.assertFalse(engine.is_armed)
+
 
 if __name__ == "__main__":
     unittest.main()

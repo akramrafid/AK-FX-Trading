@@ -21,10 +21,7 @@ class AKForexApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(
           create: (_) => provider ?? TradingProvider(
-            api: ApiService(
-              baseUrl: 'http://127.0.0.1:8642',
-              wsUrl: 'ws://127.0.0.1:8642/ws',
-            ),
+            api: ApiService.createAuto(),
           ),
         ),
       ],

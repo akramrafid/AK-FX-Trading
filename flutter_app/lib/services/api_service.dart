@@ -26,6 +26,33 @@ class ApiService {
     _eventStreamController = StreamController<Map<String, dynamic>>.broadcast();
   }
 
+  /// Automatically resolves endpoints based on runtime platform and query parameters.
+  factory ApiService.createAuto() {
+    String base = 'http://127.0.0.1:8642';
+    if (kIsWeb) {
+      final uri = Uri.base;
+      if (uri.queryParameters.containsKey('api') && uri.queryParameters['api']!.isNotEmpty) {
+        base = uri.queryParameters['api']!;
+      } else if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
+        base = '${uri.scheme}://${uri.host}:${uri.port != 0 ? uri.port : 8642}';
+      } else {
+        base = uri.origin;
+      }
+    }
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+    String ws;
+    if (base.startsWith('https://')) {
+      ws = 'wss://${base.substring(8)}/ws';
+    } else if (base.startsWith('http://')) {
+      ws = 'ws://${base.substring(7)}/ws';
+    } else {
+      ws = 'ws://$base/ws';
+    }
+    return ApiService(baseUrl: base, wsUrl: ws);
+  }
+
   Stream<Map<String, dynamic>> get eventStream => _eventStreamController!.stream;
   bool get isConnected => _isConnected;
 
