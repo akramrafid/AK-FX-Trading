@@ -13,7 +13,7 @@ class TradingProvider extends ChangeNotifier {
   Map<String, dynamic> _stats = {};
   Map<String, String> _settings = {};
 
-  String _activePair = 'EURUSDm';
+  String _activePair = 'USDCADm';
   String _activeTimeframe = '5m';
   String _chartMode = 'Candles';
   int _selectedTabIndex = 0;
@@ -283,7 +283,7 @@ class TradingProvider extends ChangeNotifier {
   }
 
   Future<void> selectPair(String pair) async {
-    final normalized = pair.toUpperCase().contains('CAD') ? 'USDCADm' : 'EURUSDm';
+    const normalized = 'USDCADm';
     if (_activePair != normalized) {
       _activePair = normalized;
       _candles = [];

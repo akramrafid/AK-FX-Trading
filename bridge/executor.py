@@ -759,7 +759,7 @@ def main() -> None:
 
     symbols = [s.strip() for s in cfg.symbol.split(",") if s.strip()]
     if not symbols:
-        symbols = ["EURUSDm"]
+        symbols = ["USDCADm"]
 
     # Read live balance from DWX_Account.txt if present
     live_bal = cfg.initial_balance

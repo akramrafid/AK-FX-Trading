@@ -14,35 +14,16 @@ class MarketChips extends StatelessWidget {
     final account = provider.account;
 
     final pairsMap = account.pairs;
-    final eurMap = pairsMap['EURUSDm'] is Map<String, dynamic>
-        ? (pairsMap['EURUSDm'] as Map<String, dynamic>)
-        : (pairsMap['EURUSD'] as Map<String, dynamic>?);
     final cadMap = pairsMap['USDCADm'] is Map<String, dynamic>
         ? (pairsMap['USDCADm'] as Map<String, dynamic>)
         : (pairsMap['USDCAD'] as Map<String, dynamic>?);
 
-    final eurBid = (eurMap?['bid'] as num?)?.toDouble() ??
-        (activePair.contains('EUR') ? account.bid : 1.13737);
-    final eurSpread = (eurMap?['spread_pips'] as num?)?.toDouble() ??
-        (activePair.contains('EUR') ? account.spreadPips : 0.8);
-
     final cadBid = (cadMap?['bid'] as num?)?.toDouble() ??
-        (activePair.contains('CAD') ? account.bid : 1.41420);
+        (account.bid > 0 ? account.bid : 1.42500);
     final cadSpread = (cadMap?['spread_pips'] as num?)?.toDouble() ??
-        (activePair.contains('CAD') ? account.spreadPips : 1.4);
+        (account.spreadPips > 0 ? account.spreadPips : 1.4);
 
     final pairs = [
-      {
-        'symbol': 'EURUSDm',
-        'displaySymbol': 'EUR / USD',
-        'name': 'Euro / US Dollar',
-        'price': eurBid.toStringAsFixed(5),
-        'spread': eurSpread.toStringAsFixed(1),
-        'change': '+0.42%',
-        'isUp': true,
-        'icon': Icons.euro_rounded,
-        'color': AppColors.accentBlue,
-      },
       {
         'symbol': 'USDCADm',
         'displaySymbol': 'USD / CAD',

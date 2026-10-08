@@ -33,7 +33,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     final settings = context.read<TradingProvider>().settings;
 
     _strategyMode = settings['STRATEGY_MODE'] ?? 'c1_wickswap';
-    _symbolCtrl = TextEditingController(text: settings['TRADING_SYMBOL'] ?? 'EURUSDm');
+    _symbolCtrl = TextEditingController(text: settings['TRADING_SYMBOL'] ?? 'USDCADm');
     _timeframeCtrl = TextEditingController(text: settings['TRADING_TIMEFRAME'] ?? 'M5');
     _riskPctCtrl = TextEditingController(text: settings['RISK_PER_TRADE_PCT'] ?? '0.015');
     _maxDailyLossCtrl = TextEditingController(text: settings['MAX_DAILY_LOSS_PCT'] ?? '0.03');
@@ -253,7 +253,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       _sectionTitle('INSTRUMENT & SIZING'),
                       Row(
                         children: [
-                          Expanded(child: _field('Broker Symbol', _symbolCtrl, 'e.g. EURUSDm (case-sensitive)')),
+                          Expanded(child: _field('Broker Symbol', _symbolCtrl, 'e.g. USDCADm (case-sensitive)')),
                           const SizedBox(width: AppSpacing.md),
                           Expanded(child: _field('Timeframe', _timeframeCtrl, 'e.g. M5')),
                         ],

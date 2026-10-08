@@ -96,7 +96,7 @@ class BridgeWatchdog:
         with self._lock:
             self._orders_dispatched += 1
 
-    def inspect_file_freshness(self, symbol: str = "EURUSD", timeframe: str = "M5") -> Optional[datetime]:
+    def inspect_file_freshness(self, symbol: str = "USDCAD", timeframe: str = "M5") -> Optional[datetime]:
         """Directly checks the filesystem modification timestamp of the DWX bars file."""
         bars_path = self.dwx_client.get_bars_file(symbol, timeframe)
         if bars_path.exists():

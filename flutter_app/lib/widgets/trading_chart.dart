@@ -70,7 +70,7 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
       }
     } else {
       // Synthesize realistic historical bars anchored to live bid if waiting for initial feed
-      final base = liveBid > 0 ? liveBid : 1.13737;
+      final base = liveBid > 0 ? liveBid : 1.42500;
       final now = DateTime.now();
       for (int i = 50; i >= 0; i--) {
         final t = now.subtract(Duration(minutes: i * 5));
@@ -437,8 +437,6 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
       _lastBuiltSignature = sig;
     }
 
-    final isEur = activePair.toUpperCase().contains('EUR');
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -456,21 +454,14 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
             crossAxisAlignment: WrapCrossAlignment.center,
             alignment: WrapAlignment.spaceBetween,
             children: [
-              // 1. STRICT 2 FOREX PAIRS SWITCHER
+              // 1. STRICT FOREX PAIR (USDCAD ONLY)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _buildPairButton(
-                    symbol: 'EURUSDm',
-                    display: 'EUR / USD',
-                    isSelected: isEur,
-                    onTap: () => provider.selectPair('EURUSDm'),
-                  ),
-                  const SizedBox(width: 4),
-                  _buildPairButton(
                     symbol: 'USDCADm',
                     display: 'USD / CAD',
-                    isSelected: !isEur,
+                    isSelected: true,
                     onTap: () => provider.selectPair('USDCADm'),
                   ),
                 ],

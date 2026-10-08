@@ -470,7 +470,7 @@ class BridgeController:
 
                 symbols = [s.strip() for s in cfg.symbol.split(",") if s.strip()]
                 if not symbols:
-                    symbols = ["EURUSDm"]
+                    symbols = ["USDCADm"]
 
                 self._bridges = []
                 for sym in symbols:
@@ -752,18 +752,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if mt4_dir is None or not mt4_dir.exists():
             return None
 
-        # Extract latest prices from both MT4 bars files
-        eur_price = 1.13770
-        eur_bars = mt4_dir / "DWX_Bars_EURUSDm_M5.txt"
-        if eur_bars.exists():
-            try:
-                el = eur_bars.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
-                if len(el) > 1:
-                    eur_price = float(el[-1].split(",")[4])
-            except Exception:
-                pass
-
-        cad_price = 1.41420
+        # Extract latest price from MT4 bars file (USDCAD focus)
+        cad_price = 1.42500
         cad_bars = mt4_dir / "DWX_Bars_USDCADm_M5.txt"
         if cad_bars.exists():
             try:
@@ -774,8 +764,6 @@ class APIHandler(BaseHTTPRequestHandler):
                 pass
 
         pairs_dict = {
-            "EURUSD": {"bid": round(eur_price, 5), "ask": round(eur_price + 0.00008, 5), "spread_pips": 0.8},
-            "EURUSDm": {"bid": round(eur_price, 5), "ask": round(eur_price + 0.00008, 5), "spread_pips": 0.8},
             "USDCAD": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
             "USDCADm": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
         }
@@ -812,41 +800,27 @@ class APIHandler(BaseHTTPRequestHandler):
                                     if "pnl" not in ord_item and "profit" in ord_item:
                                         ord_item["pnl"] = ord_item["profit"]
                         data["pairs"] = pairs_dict
-
-                        # If request specifies symbol query param
-                        try:
-                            from urllib.parse import urlparse, parse_qs
-                            qs = parse_qs(urlparse(self.path).query)
-                            req_sym = qs.get("symbol", [""])[0].upper()
-                            if "USDCAD" in req_sym:
-                                data["symbol"] = "USDCADm"
-                                data["bid"] = round(cad_price, 5)
-                                data["ask"] = round(cad_price + 0.00014, 5)
-                                data["spread_pips"] = 1.4
-                            elif "EURUSD" in req_sym:
-                                data["symbol"] = "EURUSDm"
-                                data["bid"] = round(eur_price, 5)
-                                data["ask"] = round(eur_price + 0.00008, 5)
-                                data["spread_pips"] = 0.8
-                        except Exception:
-                            pass
+                        data["symbol"] = "USDCADm"
+                        data["bid"] = round(cad_price, 5)
+                        data["ask"] = round(cad_price + 0.00014, 5)
+                        data["spread_pips"] = 1.4
 
                         return data
             except Exception as e:
                 logger.warning(f"Failed parsing DWX_Account.txt: {e}")
 
-        # 2. Secondary: Calculate live state from DWX_Bars_EURUSDm_M5.txt, DWX_Reports.txt, and .env
+        # 2. Secondary: Calculate live state from DWX_Bars_USDCADm_M5.txt, DWX_Reports.txt, and .env
         try:
-            bid = 1.13737
-            ask = 1.13745
-            bars_file = mt4_dir / "DWX_Bars_EURUSDm_M5.txt"
+            bid = cad_price
+            ask = round(cad_price + 0.00014, 5)
+            bars_file = mt4_dir / "DWX_Bars_USDCADm_M5.txt"
             if bars_file.exists():
                 lines = bars_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
                 if len(lines) > 1:
                     last_line = lines[-1].split(",")
                     if len(last_line) >= 5:
                         bid = float(last_line[4])
-                        ask = round(bid + 0.00008, 5)
+                        ask = round(bid + 0.00014, 5)
 
             # Read orders from DWX_Reports.txt and SQLite
             orders = []
@@ -864,12 +838,12 @@ class APIHandler(BaseHTTPRequestHandler):
                         rep = json.loads(line)
                         ticket = rep.get("ticket", 0)
                         if rep.get("status") == "FILLED" and ticket > 0 and ticket not in seen_tickets:
-                            symbol = rep.get("symbol", "EURUSDm")
+                            symbol = rep.get("symbol", "USDCADm")
                             o_type = rep.get("type", "BUY")
-                            lots = float(rep.get("lots", 0.11))
-                            open_price = float(rep.get("open_price", 1.13703))
-                            sl = float(rep.get("sl", 1.13636))
-                            tp = float(rep.get("tp", 1.14340))
+                            lots = float(rep.get("lots", 0.08))
+                            open_price = float(rep.get("open_price", 1.42500))
+                            sl = float(rep.get("sl", 1.42400))
+                            tp = float(rep.get("tp", 1.42900))
                             cur_price = bid if o_type == "BUY" else ask
                             pips_diff = (cur_price - open_price) if o_type == "BUY" else (open_price - cur_price)
                             pnl = round(pips_diff * lots * 100000, 2)
@@ -887,7 +861,7 @@ class APIHandler(BaseHTTPRequestHandler):
                                 "tp": tp,
                                 "profit": pnl,
                                 "comment": "AK-AI TrendWise M5",
-                                "open_time": rep.get("timestamp", "2026-09-24 12:55:01"),
+                                "open_time": rep.get("timestamp", "2026-10-08 07:04:00"),
                             })
                             seen_tickets.add(ticket)
                     except Exception:
@@ -912,7 +886,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "margin_level": margin_level,
                 "profit": open_profit,
                 "leverage": 200,
-                "symbol": "EURUSDm",
+                "symbol": "USDCADm",
                 "bid": bid,
                 "ask": ask,
                 "spread_pips": round((ask - bid) * 10000, 1),
@@ -948,10 +922,10 @@ class APIHandler(BaseHTTPRequestHandler):
             "margin_level": 0.0,
             "profit": 0.0,
             "leverage": 200,
-            "symbol": "EURUSDm",
-            "bid": 1.13737,
-            "ask": 1.13745,
-            "spread_pips": 0.8,
+            "symbol": "USDCADm",
+            "bid": 1.42500,
+            "ask": 1.42514,
+            "spread_pips": 1.4,
             "digits": 5,
             "trades_today": 0,
             "open_orders_count": 0,
@@ -970,7 +944,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 trades.append({
                     "magic": o.get("magic", 92412501),
                     "ticket": ticket,
-                    "symbol": o.get("symbol", "EURUSDm"),
+                    "symbol": o.get("symbol", "USDCADm"),
                     "direction": o.get("type", "BUY"),
                     "lots": o.get("lots", 0.11),
                     "entry_price": o.get("open_price", 0.0),
@@ -1005,7 +979,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         trades.append({
                             "magic": d.get("magic_number", 0),
                             "ticket": ticket,
-                            "symbol": d.get("symbol", "EURUSDm"),
+                            "symbol": d.get("symbol", "USDCADm"),
                             "direction": d.get("direction", "BUY"),
                             "lots": float(d.get("lots", 0.0)),
                             "entry_price": float(d.get("fill_price") or d.get("target_entry") or 0.0),
@@ -1052,7 +1026,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
-        req_sym = qs.get("symbol", ["EURUSDm"])[0].upper()
+        req_sym = qs.get("symbol", ["USDCADm"])[0].upper()
         req_tf = qs.get("timeframe", ["M5"])[0].upper()
 
         if "15" in req_tf:
@@ -1062,7 +1036,7 @@ class APIHandler(BaseHTTPRequestHandler):
         else:
             tf = "M5"
 
-        pair_name = "USDCAD" if "USDCAD" in req_sym else "EURUSD"
+        pair_name = "USDCAD"
         candidate_files = [
             f"DWX_Bars_{pair_name}m_{tf}.txt",
             f"DWX_Bars_{pair_name}_{tf}.txt",

@@ -211,12 +211,9 @@
   <div id="app-container">
     <!-- Top Interactive Toolbar -->
     <div id="toolbar">
-      <!-- 1. Dedicated Forex Pair Switcher -->
+      <!-- 1. Dedicated Forex Pair (USDCAD only) -->
       <div class="tool-group">
-        <button id="btn-eurusd" class="btn btn-pair active" onclick="switchSymbol('EURUSDm')">
-          <span>💶</span> EUR / USD
-        </button>
-        <button id="btn-usdcad" class="btn btn-pair" onclick="switchSymbol('USDCADm')">
+        <button id="btn-usdcad" class="btn btn-pair active" onclick="switchSymbol('USDCADm')">
           <span>💵</span> USD / CAD
         </button>
       </div>
@@ -259,8 +256,8 @@
         <div class="badge badge-bid">
           <span class="pulse-dot"></span>
           <span>LIVE BID: </span>
-          <span id="live-bid-val">1.13737</span>
-          <span id="live-spread-val" style="color: rgb(100, 116, 139); font-size: 9px; margin-left: 3px;">(0.8p)</span>
+          <span id="live-bid-val">1.42500</span>
+          <span id="live-spread-val" style="color: rgb(100, 116, 139); font-size: 9px; margin-left: 3px;">(1.4p)</span>
         </div>
         <div class="badge badge-rr">
           <span>⚡ 1:5 R:R Institutional</span>
@@ -271,11 +268,11 @@
     <!-- Chart Canvas & Overlay -->
     <div id="chart-wrapper">
       <div id="tv-chart"></div>
-      <div id="watermark">EURUSD • M5</div>
+      <div id="watermark">USDCAD • M5</div>
 
       <!-- Floating Legend Header -->
       <div id="legend">
-        <span class="legend-sym" id="leg-sym">EURUSDm M5</span>
+        <span class="legend-sym" id="leg-sym">USDCADm M5</span>
         <span>O: <span class="legend-val" id="leg-o">-</span></span>
         <span>H: <span class="legend-val" id="leg-h">-</span></span>
         <span>L: <span class="legend-val" id="leg-l">-</span></span>
@@ -300,7 +297,7 @@
     let smaSeries = null;
     let emaSeries = null;
 
-    let currentSymbol = 'EURUSDm';
+    let currentSymbol = 'USDCADm';
     let currentTimeframe = 'M5';
     let currentChartType = 'Candles';
     let currentTheme = 'classic';
@@ -718,8 +715,7 @@
     }
 
     function synthesizeFallbackCandles() {
-      const isEur = currentSymbol.includes('EUR');
-      const base = isEur ? 1.13737 : 1.41420;
+      const base = 1.42500;
       const nowSec = Math.floor(Date.now() / 1000);
       const stepSec = currentTimeframe === 'M1' ? 60 : (currentTimeframe === 'M15' ? 900 : 300);
       const items = [];
@@ -991,8 +987,8 @@
     // ── User Interactive Controls ─────────────────────────────────────────────
     function switchSymbol(sym) {
       currentSymbol = sym;
-      document.getElementById('btn-eurusd').classList.toggle('active', sym.includes('EUR'));
-      document.getElementById('btn-usdcad').classList.toggle('active', sym.includes('CAD'));
+      const usdcadBtn = document.getElementById('btn-usdcad');
+      if (usdcadBtn) usdcadBtn.classList.add('active');
       document.getElementById('watermark').textContent = `${sym.replace('m','')} • ${currentTimeframe}`;
       createMainSeries();
       loadData();
@@ -1082,8 +1078,8 @@
       if (params.has('symbol')) currentSymbol = params.get('symbol');
       if (params.has('tf')) currentTimeframe = params.get('tf');
 
-      document.getElementById('btn-eurusd').classList.toggle('active', currentSymbol.includes('EUR'));
-      document.getElementById('btn-usdcad').classList.toggle('active', currentSymbol.includes('CAD'));
+      const usdcadBtn = document.getElementById('btn-usdcad');
+      if (usdcadBtn) usdcadBtn.classList.add('active');
 
       initChart();
       loadData();
