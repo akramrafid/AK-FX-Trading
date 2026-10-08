@@ -15,20 +15,20 @@
 | Metric | Value |
 |---|---|
 | **Initial Capital** | $10,000.00 |
-| **Final Capital** | $-2,013.89 |
-| **Net Profit ($)** | $-12,013.89 (-120.14%) |
-| **Total Trades** | 8589 |
-| **Win Rate** | 12.77% (1097W / 7492L) |
-| **Average R (Expectancy)** | -0.23R |
-| **Total Realized R** | -2007.0R |
-| **Profit Factor** | 0.46 |
-| **Max Drawdown ($)** | $12,594.16 |
-| **Max Drawdown (%)** | 119.08% |
-| **Longest Losing Streak** | 51 trades |
+| **Final Capital** | $-2,337.04 |
+| **Net Profit ($)** | $-12,337.04 (-123.37%) |
+| **Total Trades** | 10614 |
+| **Win Rate** | 13.26% (1407W / 9207L) |
+| **Average R (Expectancy)** | -0.20R |
+| **Total Realized R** | -2172.0R |
+| **Profit Factor** | 0.44 |
+| **Max Drawdown ($)** | $12,900.79 |
+| **Max Drawdown (%)** | 122.17% |
+| **Longest Losing Streak** | 52 trades |
 | **Longest Winning Streak** | 4 trades |
-| **Sharpe Ratio (Trade)** | -6.72 |
-| **Sortino Ratio (Trade)** | -10.27 |
-| **Avg Hold Duration** | 72.4 bars |
+| **Sharpe Ratio (Trade)** | -6.99 |
+| **Sortino Ratio (Trade)** | -10.67 |
+| **Avg Hold Duration** | 74.3 bars |
 
 
 ---
@@ -50,4 +50,4 @@
 
 1. **Expectancy with 5:1 Asymmetry:** With a fixed 5:1 reward-to-risk ratio, the theoretical break-even win rate is 16.67%. Unfiltered mechanical execution with realistic frictions achieved 12.77% win rate, highlighting the importance of Phase 4 session and risk filters.
 2. **Drawdown & Loss Streak Control:** Without session timing and risk filters, raw execution produced a 51-trade losing streak. Phase 4 risk guardrails and circuit breakers are non-negotiable.
-3. **Execution Readiness:** The deterministic rule engine completed over 1.13 million M1 bars and 300,000 HTF bars in 6.98 seconds with zero exceptions or race conditions.
+3. **Execution Readiness:** The deterministic rule engine completed over 1.13 million M1 bars and 300,000 HTF bars in 7.41 seconds with zero exceptions or race conditions.
