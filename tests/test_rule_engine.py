@@ -320,7 +320,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
     def test_preset_configuration(self):
         engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD")
         self.assertTrue(engine.use_c1_only_sl)
-        self.assertTrue(engine.enable_intrabar_sweep)
+        self.assertFalse(engine.enable_intrabar_sweep)
         self.assertFalse(engine.use_sweep_wick_sl)
         self.assertFalse(engine.anchor_to_key_liquidity)
         self.assertTrue(engine.allow_variant_a)
@@ -657,7 +657,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         - No duplicate trades occur when the 15m candle closes at 15:00.
         """
         t0 = datetime(2026, 10, 6, 14, 30, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, enable_intrabar_sweep=True)
 
         # 1. Prior 15m candle (14:30): Bullish (high 1.11900)
         m15_prev = Candle(timestamp=t0, open=1.11800, high=1.11900, low=1.11780, close=1.11880)
@@ -724,7 +724,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         5. Target is 1:5 Reward-to-Risk ratio.
         """
         t0 = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, enable_intrabar_sweep=True)
 
         # Prior M5 candle: Bearish with low 1.08200
         m5_prev = Candle(timestamp=t0, open=1.08400, high=1.08450, low=1.08200, close=1.08220)
@@ -782,7 +782,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         5. Target is 1:5 Reward-to-Risk ratio.
         """
         t0 = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False, enable_intrabar_sweep=True)
 
         # Prior M5 candle: Bullish with high 1.08500
         m5_prev = Candle(timestamp=t0, open=1.08300, high=1.08500, low=1.08280, close=1.08480)
@@ -847,7 +847,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
            - 1:5 Reward-to-Risk ratio -> TP = 1.42598 - 5 * (1.42635 - 1.42598) = 1.42413.
         """
         t0 = datetime(2026, 10, 8, 6, 55, tzinfo=timezone.utc)
-        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False)
+        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False, enable_intrabar_sweep=True)
 
         # Prior M5 candle (06:55): Bullish with high 1.42629
         m5_prev = Candle(timestamp=t0, open=1.42603, high=1.42629, low=1.42598, close=1.42626)
@@ -890,6 +890,43 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         # TP = 1.42598 - 0.00185 = 1.42413
         self.assertAlmostEqual(signal.take_profit, 1.42413, places=5)
         self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+    def test_never_trade_without_closed_htf_wick_swap(self):
+        """
+        User rule: On closed HTF candles (M5 or M15), if there was NO
+        bearish/bullish candle wick swap, the engine must NEVER execute trade.
+        Intrabar dips/spikes without a closed HTF sweep must not arm or trigger.
+        """
+        t0 = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        # Default preset strictly enforces enable_intrabar_sweep=False
+        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False)
+        self.assertFalse(engine.enable_intrabar_sweep)
+
+        # Prior closed M5 candle (12:00-12:05): Bearish with low 1.42550
+        m5_prev = Candle(timestamp=t0, open=1.42580, high=1.42600, low=1.42550, close=1.42560)
+        engine.on_htf_candle(m5_prev, timeframe="M5")
+
+        # Forming M5 candle (12:05):
+        # 12:06 M1 dips below 1.42550 to 1.42530 (intrabar dip)
+        t_m5 = t0 + timedelta(minutes=5)
+        m1_dip = Candle(timestamp=t_m5 + timedelta(minutes=1), open=1.42560, high=1.42565, low=1.42530, close=1.42555)
+        self.assertIsNone(engine.on_m1_candle(m1_dip))
+        # MUST NOT arm intrabar!
+        self.assertFalse(engine.is_armed, "Must NOT arm intrabar when enable_intrabar_sweep is False")
+
+        # Even with 3 bullish confirming M1 candles forming:
+        m1_c1 = Candle(timestamp=t_m5 + timedelta(minutes=2), open=1.42555, high=1.42570, low=1.42550, close=1.42568)
+        m1_c2 = Candle(timestamp=t_m5 + timedelta(minutes=3), open=1.42568, high=1.42580, low=1.42565, close=1.42578)
+        m1_c3 = Candle(timestamp=t_m5 + timedelta(minutes=4), open=1.42578, high=1.42590, low=1.42575, close=1.42588)
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+        sig = engine.on_m1_candle(m1_c3)
+        self.assertIsNone(sig, "Must NEVER trade without a closed HTF candle wick swap")
+
+        # When 12:05 M5 closes, its low was 1.42552 (did NOT sweep 1.42550 on closed bar)
+        m5_closed_no_sweep = Candle(timestamp=t_m5, open=1.42560, high=1.42590, low=1.42552, close=1.42588)
+        self.assertIsNone(engine.on_htf_candle(m5_closed_no_sweep, timeframe="M5"))
+        self.assertFalse(engine.is_armed, "Must NOT arm if closed M5 did not swap wick")
 
 
 if __name__ == "__main__":

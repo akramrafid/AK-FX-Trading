@@ -483,6 +483,7 @@ class BridgeController:
                             session_filter=cfg.session_filter_enabled,
                             session_start_hour=cfg.session_start_hour,
                             session_end_hour=cfg.session_end_hour,
+                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", False),
                         )
                     else:
                         engine = RuleEngine.institutional_preset(
@@ -492,6 +493,7 @@ class BridgeController:
                             session_filter=cfg.session_filter_enabled,
                             session_start_hour=cfg.session_start_hour,
                             session_end_hour=cfg.session_end_hour,
+                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", False),
                         )
 
                     b = BridgeExecutor(

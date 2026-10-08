@@ -57,6 +57,7 @@ class AppConfig:
     symbol: str = "EURUSD"
     timeframe: str = "M5"
     strategy_mode: str = "c1_wickswap"  # "c1_wickswap" (test strategy) or "institutional"
+    enable_intrabar_sweep: bool = False  # Closed HTF candle sweep mandatory by default
     initial_balance: Decimal = Decimal("10000.00")
     risk_pct: Decimal = Decimal("0.01")  # 1.0%
 
@@ -136,6 +137,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         symbol=get_var("TRADING_SYMBOL", "EURUSD").strip().replace("/", ""),
         timeframe=get_var("TRADING_TIMEFRAME", "M5").upper(),
         strategy_mode=get_var("STRATEGY_MODE", "c1_wickswap").strip().lower(),
+        enable_intrabar_sweep=get_var("ENABLE_INTRABAR_SWEEP", "false").lower() in ("true", "1", "yes"),
         initial_balance=Decimal(get_var("ACCOUNT_INITIAL_BALANCE", "10000.00")),
         risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.01")),
         max_daily_loss_pct=max_daily_loss_pct_val,

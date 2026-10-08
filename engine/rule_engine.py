@@ -229,7 +229,7 @@ class RuleEngine:
             session_end_hour=session_end_hour,
             check_m5=check_m5,
             check_m15=check_m15,
-            enable_intrabar_sweep=True,
+            enable_intrabar_sweep=False,
             **kwargs,
         )
 
@@ -258,7 +258,7 @@ class RuleEngine:
         spread_pips: float = 0.0,
         check_m5: bool = True,
         check_m15: bool = True,
-        enable_intrabar_sweep: bool = True,
+        enable_intrabar_sweep: bool = False,
         **kwargs,
     ) -> RuleEngine:
         """
