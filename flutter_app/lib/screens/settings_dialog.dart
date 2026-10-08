@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/tactile_button.dart';
 import '../widgets/tactile_wrapper.dart';
+import '../widgets/account_connect_dialog.dart';
 
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key});
@@ -277,7 +278,25 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       ),
 
                       const SizedBox(height: AppSpacing.lg),
-                      _sectionTitle('MT4 TERMINAL & BRIDGE PATH'),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _sectionTitle('MT4 TERMINAL & BRIDGE PATH'),
+                          TactileButton(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (_) => const AccountConnectDialog(),
+                              );
+                            },
+                            variant: TactileButtonVariant.secondary,
+                            label: 'Connect / Auto-Detect MT4',
+                            icon: const Icon(Icons.link_rounded, size: 16, color: AppColors.accentLime),
+                            height: 32,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                        ],
+                      ),
                       _field('MQL4 Files Directory', _mt4PathCtrl, r'C:\Users\...\Terminal\<ID>\MQL4\Files'),
 
                       const SizedBox(height: AppSpacing.lg),

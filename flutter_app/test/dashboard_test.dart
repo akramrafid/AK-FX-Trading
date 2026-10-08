@@ -19,12 +19,11 @@ void main() {
     // Verify HeaderNav
     expect(find.byType(HeaderNav), findsOneWidget);
     expect(find.text('QUANT TRADING DESK'), findsOneWidget);
-    expect(find.text('EURUSDm'), findsWidgets);
+    expect(find.text('USDCADm'), findsWidgets);
 
     // Verify MarketChips
     expect(find.byType(MarketChips), findsOneWidget);
-    expect(find.text('EURUSDm'), findsWidgets);
-    expect(find.text('USDCADm'), findsOneWidget);
+    expect(find.text('USDCADm'), findsWidgets);
 
     // Verify TradingChart
     expect(find.byType(TradingChart), findsOneWidget);

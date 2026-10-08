@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/trading_provider.dart';
 import '../theme/app_theme.dart';
 import 'tactile_wrapper.dart';
+import 'account_connect_dialog.dart';
 
 class HeaderNav extends StatelessWidget {
   final int selectedIndex;
@@ -178,49 +179,71 @@ class HeaderNav extends StatelessWidget {
           // ── Right Status & Controls ──────────────────────────────────
           Row(
             children: [
-              // MT4 Account Tag
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.bgCardDark,
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: AppColors.glassBorder),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppColors.accentGreen,
-                        shape: BoxShape.circle,
-                      ),
+              // MT4 Account Tag (Click to Connect / Switch Account)
+              TactileWrapper(
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (_) => const AccountConnectDialog(),
+                  );
+                },
+                pressScale: 0.95,
+                hoverScale: 1.03,
+                child: Tooltip(
+                  message: 'Click to Connect / Switch MT4 Account',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.bgCardDark,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(color: AppColors.glassBorder),
                     ),
-                    const SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+                    child: Row(
                       children: [
-                        Text(
-                          '${account.company} #${account.accountNumber}',
-                          style: const TextStyle(
-                            fontFamily: 'Segoe UI',
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: account.accountNumber > 0
+                                ? AppColors.accentGreen
+                                : AppColors.accentOrange,
+                            shape: BoxShape.circle,
                           ),
                         ),
-                        Text(
-                          '\$${account.balance.toStringAsFixed(2)} ${account.currency}',
-                          style: AppTypography.mono(
-                            fontSize: 10,
-                            color: AppColors.accentLime,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '${account.company} #${account.accountNumber}',
+                                  style: const TextStyle(
+                                    fontFamily: 'Segoe UI',
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.link_rounded, size: 12, color: AppColors.accentLime),
+                              ],
+                            ),
+                            Text(
+                              '\$${account.balance.toStringAsFixed(2)} ${account.currency}',
+                              style: AppTypography.mono(
+                                fontSize: 10,
+                                color: AppColors.accentLime,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
               ),
 

@@ -807,9 +807,26 @@ def main() -> None:
 
     for sym in symbols:
         engine = (
-            RuleEngine.c1_wickswap_preset(symbol=sym)
+            RuleEngine.c1_wickswap_preset(
+                symbol=sym,
+                check_m5=True,
+                check_m15=True,
+                session_filter=cfg.session_filter_enabled,
+                session_start_hour=cfg.session_start_hour,
+                session_end_hour=cfg.session_end_hour,
+                spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
+                enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
+            )
             if is_c1_mode
-            else RuleEngine.institutional_preset(symbol=sym)
+            else RuleEngine.institutional_preset(
+                symbol=sym,
+                check_m5=True,
+                check_m15=True,
+                session_filter=cfg.session_filter_enabled,
+                session_start_hour=cfg.session_start_hour,
+                session_end_hour=cfg.session_end_hour,
+                enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
+            )
         )
         b = BridgeExecutor(
             symbol=sym,

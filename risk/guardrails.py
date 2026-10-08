@@ -198,6 +198,7 @@ class RiskGuardrails:
             self.alert_callback(f"EMERGENCY HALT: {reason}")
 
     trigger_emergency_halt = trip_emergency_halt
+    activate_emergency_halt = trip_emergency_halt
 
     def reset_emergency_halt(self) -> None:
         """Clears emergency halt status."""

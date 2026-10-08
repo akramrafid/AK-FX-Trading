@@ -9,7 +9,7 @@ import 'tactile_wrapper.dart';
 import 'tv_chart_view.dart';
 
 /// Interactive financial chart powered by the [financial_chart] package and TradingView Lightweight Charts.
-/// Exclusively dedicated to EURUSD and USDCAD forex pairs with real-time MT4 feeds
+/// Exclusively dedicated to USDCAD forex pair with real-time MT4 feeds
 /// and rich multi-layered technical customizations.
 class TradingChart extends StatefulWidget {
   const TradingChart({super.key});
@@ -852,10 +852,10 @@ class _TradingChartState extends State<TradingChart> with TickerProviderStateMix
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              symbol.contains('EUR') ? Icons.euro_rounded : Icons.attach_money_rounded,
+            const Icon(
+              Icons.attach_money_rounded,
               size: 13,
-              color: isSelected ? AppColors.accentBlue : AppColors.textMuted,
+              color: AppColors.accentBlue,
             ),
             const SizedBox(width: 4),
             Text(

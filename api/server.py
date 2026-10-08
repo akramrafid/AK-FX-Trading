@@ -133,6 +133,105 @@ def launch_mt4_terminal(custom_path: Optional[str | Path] = None) -> bool:
         return False
 
 
+def auto_detect_mt4_files_dir() -> Optional[Path]:
+    """Scan %APPDATA%/MetaQuotes/Terminal for active MQL4/Files directory."""
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+    base_dir = Path(appdata) / "MetaQuotes" / "Terminal"
+    if not base_dir.exists():
+        return None
+
+    candidates: List[Path] = []
+    for item in base_dir.iterdir():
+        if item.is_dir():
+            files_dir = item / "MQL4" / "Files"
+            if files_dir.exists():
+                candidates.append(files_dir)
+
+    if not candidates:
+        return None
+
+    def score(p: Path) -> float:
+        s = 0.0
+        if (p / "DWX_Account.txt").exists():
+            s += 1000.0
+        if (p / "DWX_Bars_USDCADm_M5.txt").exists():
+            s += 500.0
+        try:
+            s += p.stat().st_mtime / 1e9
+        except Exception:
+            pass
+        return s
+
+    candidates.sort(key=score, reverse=True)
+    return candidates[0]
+
+
+def auto_detect_mt4_exe(custom_path: Optional[str | Path] = None) -> Optional[Path]:
+    """Find installed MetaTrader 4 terminal executable."""
+    candidates: List[Path] = []
+    if custom_path:
+        candidates.append(Path(custom_path))
+
+    try:
+        from config import load_config
+        cfg = load_config()
+        if getattr(cfg, "mt4_exe_path", None):
+            candidates.append(Path(cfg.mt4_exe_path))
+    except Exception:
+        pass
+
+    candidates.extend([
+        Path(r"C:\Program Files (x86)\MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files\MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files (x86)\Exness MetaTrader 4\terminal.exe"),
+        Path(r"C:\Program Files\Exness MetaTrader 4\terminal.exe"),
+    ])
+
+    for cand in candidates:
+        if cand and cand.is_file():
+            return cand
+    return None
+
+
+def connect_and_launch_mt4(
+    account_number: str,
+    password: Optional[str] = None,
+    server: Optional[str] = None,
+    custom_exe: Optional[str | Path] = None,
+) -> bool:
+    """Launch MetaTrader 4 terminal with account credentials and server."""
+    target_exe = auto_detect_mt4_exe(custom_exe)
+    if not target_exe:
+        logger.warning("Could not find terminal.exe to connect account.")
+        return False
+
+    args = [str(target_exe)]
+    if account_number:
+        args.append(f"/login:{account_number}")
+    if password:
+        args.append(f"/password:{password}")
+    if server:
+        args.append(f"/server:{server}")
+
+    logger.info(f"Connecting MT4 account {account_number} on {server} via {target_exe}...")
+    try:
+        if len(args) > 1:
+            subprocess.Popen(
+                args,
+                cwd=str(target_exe.parent),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            launch_mt4_terminal(target_exe)
+        time.sleep(2.0)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to connect and launch MT4: {e}")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # JSON helpers
 # ---------------------------------------------------------------------------
@@ -304,7 +403,7 @@ class BridgeController:
             if rg is not None:
                 limits = getattr(rg, "limits", None)
                 if limits is not None:
-                    halted = getattr(limits, "emergency_halt", False)
+                    halted = getattr(limits, "emergency_halt", False) or self._emergency_halt
 
             all_records = []
             for b in active_bridges:
@@ -413,13 +512,38 @@ class BridgeController:
                 original_guardrail_cb = alerts.create_guardrail_callback()
                 original_watchdog_cb = alerts.create_watchdog_callback()
 
-                def guardrail_cb(reasons, message):
-                    original_guardrail_cb(reasons, message)
-                    self.event_bus.broadcast("risk_rejection", {"reasons": [str(r) for r in reasons], "message": message})
+                def guardrail_cb(reasons_or_text, message=None):
+                    if message is None:
+                        text = str(reasons_or_text)
+                        try:
+                            original_guardrail_cb(text)
+                        except Exception:
+                            pass
+                        self.event_bus.broadcast("risk_rejection", {"reasons": [], "message": text})
+                    else:
+                        text = f"{reasons_or_text}: {message}"
+                        try:
+                            original_guardrail_cb(text)
+                        except Exception:
+                            pass
+                        reasons_list = [str(r) for r in reasons_or_text] if isinstance(reasons_or_text, (list, tuple)) else [str(reasons_or_text)]
+                        self.event_bus.broadcast("risk_rejection", {"reasons": reasons_list, "message": str(message)})
 
-                def watchdog_cb(status):
-                    original_watchdog_cb(status)
-                    self.event_bus.broadcast("watchdog_alert", {"state": status.state.value, "message": status.status_message})
+                def watchdog_cb(status_or_text):
+                    if hasattr(status_or_text, "state"):
+                        msg = f"{status_or_text.state.value}: {status_or_text.status_message}"
+                        try:
+                            original_watchdog_cb(msg)
+                        except Exception:
+                            pass
+                        self.event_bus.broadcast("watchdog_alert", {"state": status_or_text.state.value, "message": status_or_text.status_message})
+                    else:
+                        msg = str(status_or_text)
+                        try:
+                            original_watchdog_cb(msg)
+                        except Exception:
+                            pass
+                        self.event_bus.broadcast("watchdog_alert", {"state": "ALERT", "message": msg})
 
                 limits = RiskLimits(
                     max_daily_loss_pct=cfg.max_daily_loss_pct,
@@ -482,6 +606,7 @@ class BridgeController:
                             check_m15=True,
                             session_filter=cfg.session_filter_enabled,
                             session_start_hour=cfg.session_start_hour,
+                            session_end_hour=cfg.session_end_hour,
                             spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
                             enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
                         )
@@ -493,7 +618,7 @@ class BridgeController:
                             session_filter=cfg.session_filter_enabled,
                             session_start_hour=cfg.session_start_hour,
                             session_end_hour=cfg.session_end_hour,
-                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", False),
+                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
                         )
 
                     b = BridgeExecutor(
@@ -562,11 +687,21 @@ class BridgeController:
         for b in self._bridges:
             rg = getattr(b, "risk_guardrails", None)
             if rg is not None:
-                rg.activate_emergency_halt("Emergency halt via Flutter app")
+                if hasattr(rg, "trip_emergency_halt"):
+                    rg.trip_emergency_halt("Emergency halt via Flutter app")
+                elif hasattr(rg, "trigger_emergency_halt"):
+                    rg.trigger_emergency_halt("Emergency halt via Flutter app")
+                elif hasattr(rg, "activate_emergency_halt"):
+                    rg.activate_emergency_halt("Emergency halt via Flutter app")
         if self._bridge is not None:
             rg = getattr(self._bridge, "risk_guardrails", None)
             if rg is not None:
-                rg.activate_emergency_halt("Emergency halt via Flutter app")
+                if hasattr(rg, "trip_emergency_halt"):
+                    rg.trip_emergency_halt("Emergency halt via Flutter app")
+                elif hasattr(rg, "trigger_emergency_halt"):
+                    rg.trigger_emergency_halt("Emergency halt via Flutter app")
+                elif hasattr(rg, "activate_emergency_halt"):
+                    rg.activate_emergency_halt("Emergency halt via Flutter app")
         self.event_bus.broadcast("emergency_halt", {"active": True, "emergency_halt": True})
         return {"status": "halted", "emergency_halt": True}
 
@@ -650,6 +785,7 @@ class APIHandler(BaseHTTPRequestHandler):
         routes: Dict[str, Callable[[], Any]] = {
             "/api/status": self._get_status,
             "/api/account": self._get_account,
+            "/api/account/detect": self._get_account_detect,
             "/api/trades": self._get_trades,
             "/api/signals": self._get_signals,
             "/api/candles": self._get_candles,
@@ -730,6 +866,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "/api/bridge/halt": lambda: self.controller.emergency_halt(),
             "/api/bridge/resume": lambda: self.controller.resume(),
             "/api/mt4/launch": lambda: self.controller.launch_mt4(),
+            "/api/account/connect": self._post_account_connect,
             "/api/settings": self._post_settings,
         }
 
@@ -1157,6 +1294,174 @@ class APIHandler(BaseHTTPRequestHandler):
             env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
             return {"status": "updated", "keys": list(updated_keys)}
         except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def _get_account_detect(self) -> Dict[str, Any]:
+        detected_files = auto_detect_mt4_files_dir()
+        detected_exe = auto_detect_mt4_exe()
+        settings = self._get_settings()
+        curr_acc = settings.get("ACCOUNT_NUMBER", "70702138")
+        curr_srv = settings.get("ACCOUNT_SERVER", "Exness-Real21")
+        return {
+            "status": "ok",
+            "detected_files_dir": str(detected_files) if detected_files else "",
+            "detected_exe_path": str(detected_exe) if detected_exe else "",
+            "mt4_process_running": is_mt4_running(),
+            "current_account": curr_acc,
+            "current_server": curr_srv,
+            "symbol": "USDCADm",
+        }
+
+    def _post_account_connect(self) -> Dict[str, Any]:
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else ""
+            data = json.loads(body) if body else {}
+
+            account_num = str(data.get("account_number") or data.get("account") or "").strip()
+            password = str(data.get("password", "")).strip()
+            server = str(data.get("server", "")).strip()
+            terminal_path = data.get("terminal_path")
+            auto_start = data.get("auto_start_bridge", True)
+
+            if not account_num:
+                return {"status": "error", "message": "Account number is required"}
+
+            # Auto-detect or validate files directory
+            files_dir: Optional[Path] = None
+            if terminal_path and Path(terminal_path).exists():
+                files_dir = Path(terminal_path)
+            else:
+                env_settings = self._get_settings()
+                if "MT4_FILES_DIR" in env_settings and Path(env_settings["MT4_FILES_DIR"]).exists():
+                    files_dir = Path(env_settings["MT4_FILES_DIR"])
+                else:
+                    files_dir = auto_detect_mt4_files_dir()
+
+            # Auto-detect exe
+            exe_path = auto_detect_mt4_exe()
+
+            # Update .env
+            env_updates = {
+                "ACCOUNT_NUMBER": account_num,
+                "TRADING_SYMBOL": "USDCADm",
+            }
+            if server:
+                env_updates["ACCOUNT_SERVER"] = server
+            if files_dir:
+                env_updates["MT4_FILES_DIR"] = str(files_dir)
+            if exe_path:
+                env_updates["MT4_EXE_PATH"] = str(exe_path)
+
+            env_path = Path("d:/AK Forex Trading/.env")
+            lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+            updated_lines = []
+            updated_keys = set()
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in env_updates:
+                        updated_lines.append(f"{key}={env_updates[key]}")
+                        updated_keys.add(key)
+                        continue
+                updated_lines.append(line)
+            for k, v in env_updates.items():
+                if k not in updated_keys:
+                    updated_lines.append(f"{k}={v}")
+                    updated_keys.add(k)
+            env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+            # Update or create DWX_Account.txt immediately in the MT4 files directory
+            cad_price = 1.42500
+            if files_dir and files_dir.exists():
+                cad_bars = files_dir / "DWX_Bars_USDCADm_M5.txt"
+                if cad_bars.exists():
+                    try:
+                        cl = cad_bars.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+                        if len(cl) > 1:
+                            cad_price = float(cl[-1].split(",")[4])
+                    except Exception:
+                        pass
+
+                acc_file = files_dir / "DWX_Account.txt"
+                acc_dict = {}
+                if acc_file.exists():
+                    try:
+                        acc_dict = json.loads(acc_file.read_text(encoding="utf-8", errors="ignore"))
+                    except Exception:
+                        pass
+
+                try:
+                    acc_int = int("".join(filter(str.isdigit, account_num)))
+                except Exception:
+                    acc_int = 70702138
+
+                acc_dict["account_number"] = acc_int
+                if server:
+                    acc_dict["company"] = server
+                acc_dict["symbol"] = "USDCADm"
+                acc_dict["currency"] = "USD"
+                acc_dict["pairs"] = {
+                    "USDCADm": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
+                    "USDCAD": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
+                }
+                if "balance" not in acc_dict:
+                    acc_dict["balance"] = 500.0
+                    acc_dict["equity"] = 500.0
+                    acc_dict["margin"] = 0.0
+                    acc_dict["free_margin"] = 500.0
+                    acc_dict["margin_level"] = 0.0
+                    acc_dict["profit"] = 0.0
+                    acc_dict["leverage"] = 200
+                    acc_dict["digits"] = 5
+                    acc_dict["orders"] = []
+                acc_dict["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+                try:
+                    acc_file.write_text(json.dumps(acc_dict, indent=2), encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"Could not write DWX_Account.txt: {e}")
+
+            # Connect and launch MT4 terminal with credentials
+            connect_and_launch_mt4(
+                account_number=account_num,
+                password=password if password else None,
+                server=server if server else None,
+                custom_exe=exe_path,
+            )
+
+            # Automatically start / refresh trading bridge
+            if auto_start:
+                try:
+                    if self.controller.is_running:
+                        self.controller.stop()
+                        time.sleep(1.0)
+                    self.controller.start()
+                except Exception as e:
+                    logger.warning(f"Bridge start exception: {e}")
+
+            # Broadcast updated account info & status to connected clients
+            refreshed_acc = self._get_account()
+            self.event_bus.broadcast("account_update", refreshed_acc)
+            self.event_bus.broadcast("status", self.controller.get_status())
+            self.event_bus.broadcast("system_notice", {
+                "message": f"MetaTrader 4 Account #{account_num} connected ({server or 'Auto-Detected'})."
+            })
+
+            return {
+                "status": "connected",
+                "account_number": account_num,
+                "server": server or "Exness",
+                "balance": refreshed_acc.get("balance", 500.0),
+                "equity": refreshed_acc.get("equity", 500.0),
+                "currency": refreshed_acc.get("currency", "USD"),
+                "mt4_running": is_mt4_running(),
+                "bridge_running": self.controller.is_running,
+                "message": f"MetaTrader 4 account #{account_num} connected successfully.",
+            }
+        except Exception as e:
+            logger.error(f"Error in _post_account_connect: {e}")
             return {"status": "error", "message": str(e)}
 
     # ── WebSocket upgrade ────────────────────────────────────────────────

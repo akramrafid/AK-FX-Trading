@@ -284,4 +284,47 @@ class ApiService {
       return false;
     }
   }
+
+  // ── MT4 Account Connection ──────────────────────────────────────────
+
+  Future<Map<String, dynamic>> detectMt4() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/api/account/detect')).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return json.decode(res.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('detectMt4 failed: $e');
+    }
+    return {'status': 'error', 'message': 'Could not detect MT4'};
+  }
+
+  Future<Map<String, dynamic>> connectAccount({
+    required String accountNumber,
+    required String password,
+    required String server,
+    String? terminalPath,
+    bool autoStartBridge = true,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/account/connect'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'account_number': accountNumber,
+          'password': password,
+          'server': server,
+          if (terminalPath != null && terminalPath.isNotEmpty) 'terminal_path': terminalPath,
+          'auto_start_bridge': autoStartBridge,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        return json.decode(res.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('connectAccount failed: $e');
+      return {'status': 'error', 'message': e.toString()};
+    }
+    return {'status': 'error', 'message': 'Failed to connect MT4 account'};
+  }
 }

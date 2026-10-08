@@ -261,7 +261,7 @@ class RuleEngine:
         spread_pips: float = 0.0,
         check_m5: bool = True,
         check_m15: bool = True,
-        enable_intrabar_sweep: bool = False,
+        enable_intrabar_sweep: bool = True,
         **kwargs,
     ) -> RuleEngine:
         """
@@ -830,7 +830,7 @@ class RuleEngine:
             return None
 
         # Ignore 1m candles that closed before or during the sweep candle
-        if self.armed_state.is_intrabar or self.enable_intrabar_sweep:
+        if self.armed_state.is_intrabar:
             if candle.timestamp < self.armed_state.sweep_candle.timestamp:
                 return None
             elif candle.timestamp == self.armed_state.sweep_candle.timestamp:

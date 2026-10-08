@@ -134,7 +134,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
 
     return AppConfig(
         mt4_files_dir=mt4_dir,
-        symbol=get_var("TRADING_SYMBOL", "EURUSD").strip().replace("/", ""),
+        symbol=get_var("TRADING_SYMBOL", "USDCADm").strip().replace("/", ""),
         timeframe=get_var("TRADING_TIMEFRAME", "M5").upper(),
         strategy_mode=get_var("STRATEGY_MODE", "c1_wickswap").strip().lower(),
         enable_intrabar_sweep=get_var("ENABLE_INTRABAR_SWEEP", "true").lower() in ("true", "1", "yes"),

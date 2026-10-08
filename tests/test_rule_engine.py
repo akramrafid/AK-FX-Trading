@@ -320,7 +320,7 @@ class TestC1WickSwapStrategy(unittest.TestCase):
     def test_preset_configuration(self):
         engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD")
         self.assertTrue(engine.use_c1_only_sl)
-        self.assertFalse(engine.enable_intrabar_sweep)
+        self.assertTrue(engine.enable_intrabar_sweep)
         self.assertFalse(engine.use_sweep_wick_sl)
         self.assertFalse(engine.anchor_to_key_liquidity)
         self.assertTrue(engine.allow_variant_a)
@@ -898,8 +898,8 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         Intrabar dips/spikes without a closed HTF sweep must not arm or trigger.
         """
         t0 = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
-        # Default preset strictly enforces enable_intrabar_sweep=False
-        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False)
+        # When explicitly configured with enable_intrabar_sweep=False
+        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False, enable_intrabar_sweep=False)
         self.assertFalse(engine.enable_intrabar_sweep)
 
         # Prior closed M5 candle (12:00-12:05): Bearish with low 1.42550
@@ -1002,6 +1002,86 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         engine.on_m1_candle(m1_dip)
         # Should NOT arm BUY because M15 SELL sweep hierarchy is in effect
         self.assertFalse(engine.is_armed, "Must NOT arm counter-trend BUY while M15 SELL sweep cycle is active")
+
+    def test_usdcad_oct8_intrabar_m15_bullish_wick_sweep_by_forming_bearish_candle_sell_trade(self):
+        """
+        Exact user TradingView setup from 2026-10-08 20:45-20:53 (14:45-14:53 UTC):
+        - 14:30 M15 Bullish candle: High = 1.42321, Close = 1.42310
+        - 14:45 M15 Forming Bearish candle (unclosed at 14:47-14:53):
+          - At 14:47 M1: High = 1.42336 (sweeps 14:30 bullish candle wick at 1.42321 intrabar)
+          - Engine arms SELL with extreme_price = 1.42336
+          - 14:51 M1: C1 Bearish (High = 1.42311, Close = 1.42290)
+          - 14:52 M1: C2 Bearish (High = 1.42289, Close = 1.42271)
+          - 14:53 M1: C3 Bearish (High = 1.42271, Close = 1.42247)
+        - Confirms 3 consecutive bearish candles!
+        - Places SELL trade immediately without waiting for 14:45 M15 candle to close:
+          - Entry: 1.42247 (close of C3)
+          - Stop Loss: 1.42311 (top of C1, the 1st bearish candle)
+          - Take Profit: 1.41927 (1:5 RR, 32 pips target)
+        """
+        engine = RuleEngine.c1_wickswap_preset(
+            symbol="USDCADm",
+            session_filter=True,
+            session_start_hour=7,
+            session_end_hour=21,
+            spread_pips=0.0,
+            buffer_pips=0.0,
+        )
+        self.assertTrue(engine.enable_intrabar_sweep)
+
+        t0 = datetime(2026, 10, 8, 14, 30, tzinfo=timezone.utc)
+        # Prior closed M15 candle: Bullish with high 1.42321
+        m15_prev = Candle(timestamp=t0, open=1.42249, high=1.42321, low=1.42226, close=1.42310)
+        engine.on_htf_candle(m15_prev, timeframe="M15")
+
+        # Prior closed M5 candle: 14:40-14:45
+        m5_prev = Candle(timestamp=t0 + timedelta(minutes=10), open=1.42276, high=1.42320, low=1.42276, close=1.42310)
+        engine.on_htf_candle(m5_prev, timeframe="M5")
+
+        # Forming 14:45 M15 candle:
+        # 14:47 M1 sweeps prior M15 high 1.42321 with high 1.42336
+        t_forming = t0 + timedelta(minutes=15)
+        m1_sweep = Candle(timestamp=t_forming + timedelta(minutes=2), open=1.42322, high=1.42336, low=1.42318, close=1.42323)
+        self.assertIsNone(engine.on_m1_candle(m1_sweep))
+        self.assertTrue(engine.is_armed)
+        self.assertEqual(engine.armed_state.direction, Direction.SELL)
+        self.assertEqual(engine.armed_state.sweep_timeframe, "M15")
+        self.assertAlmostEqual(engine.armed_state.extreme_price, 1.42336, places=5)
+
+        # 14:48 M1: Bearish candle (Conf = 1)
+        m1_48 = Candle(timestamp=t_forming + timedelta(minutes=3), open=1.42324, high=1.42330, low=1.42290, close=1.42290)
+        self.assertIsNone(engine.on_m1_candle(m1_48))
+
+        # 14:49 M1: Bullish candle (resets streak)
+        m1_49 = Candle(timestamp=t_forming + timedelta(minutes=4), open=1.42293, high=1.42313, low=1.42293, close=1.42300)
+        self.assertIsNone(engine.on_m1_candle(m1_49))
+
+        # 14:50 M1: Bullish candle
+        m1_50 = Candle(timestamp=t_forming + timedelta(minutes=5), open=1.42298, high=1.42311, low=1.42296, close=1.42304)
+        self.assertIsNone(engine.on_m1_candle(m1_50))
+
+        # 14:51 M1: C1 Bearish (High 1.42311)
+        m1_c1 = Candle(timestamp=t_forming + timedelta(minutes=6), open=1.42305, high=1.42311, low=1.42289, close=1.42290)
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+
+        # 14:52 M1: C2 Bearish
+        m1_c2 = Candle(timestamp=t_forming + timedelta(minutes=7), open=1.42287, high=1.42289, low=1.42268, close=1.42271)
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+
+        # 14:53 M1: C3 Bearish (Close 1.42247)
+        m1_c3 = Candle(timestamp=t_forming + timedelta(minutes=8), open=1.42268, high=1.42271, low=1.42247, close=1.42247)
+        sig = engine.on_m1_candle(m1_c3)
+
+        self.assertIsNotNone(sig, "Must execute SELL trade after 3 consecutive bearish candles during unclosed M15 intrabar sweep")
+        self.assertEqual(sig.direction, "SELL")
+        self.assertAlmostEqual(sig.entry_price, 1.42247, places=5)
+        # User rule: Stoploss strictly at the top of the 1st bearish candle (C1 high)
+        self.assertAlmostEqual(sig.stop_loss, 1.42311, places=5)
+        # 1:5 RR Take Profit
+        self.assertAlmostEqual(sig.take_profit, 1.41927, places=5)
+        self.assertAlmostEqual(sig.reward_risk_ratio, 5.0, places=1)
+        self.assertFalse(engine.is_armed)
+
 
 
 if __name__ == "__main__":

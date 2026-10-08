@@ -106,19 +106,21 @@ class TradingProvider extends ChangeNotifier {
         break;
 
       case 'bridge_started':
-        _bridgeState = BridgeState(
+        _bridgeState = _bridgeState.copyWith(
           isRunning: true,
           symbol: data['symbol'] ?? _activePair,
           timeframe: data['timeframe'] ?? 'M5',
         );
         _logActivity('Bridge Started for ${_bridgeState.symbol} ${_bridgeState.timeframe}');
         notifyListeners();
+        refreshStatus();
         break;
 
       case 'bridge_stopped':
-        _bridgeState = BridgeState(isRunning: false);
+        _bridgeState = _bridgeState.copyWith(isRunning: false);
         _logActivity('Bridge Stopped');
         notifyListeners();
+        refreshStatus();
         break;
 
       case 'system_notice':
@@ -217,7 +219,7 @@ class TradingProvider extends ChangeNotifier {
 
   Future<bool> startBridge() async {
     _logActivity('Checking MetaTrader 4 & Starting Live Bridge...');
-    _bridgeState = BridgeState(
+    _bridgeState = _bridgeState.copyWith(
       isRunning: true,
       symbol: _activePair,
       mt4ProcessRunning: true,
@@ -228,12 +230,14 @@ class TradingProvider extends ChangeNotifier {
     final ok = await api.startBridge();
     if (ok) {
       _logActivity('Live Trading Bridge Active (MetaTrader 4 connected)');
+      await refreshStatus();
       Future.delayed(const Duration(milliseconds: 1500), refreshStatus);
       Future.delayed(const Duration(milliseconds: 2500), refreshAccount);
     } else {
-      _bridgeState = BridgeState(isRunning: false);
+      _bridgeState = _bridgeState.copyWith(isRunning: false);
       _logActivity('Failed to start bridge. Verify terminal connection.');
       notifyListeners();
+      await refreshStatus();
     }
     return ok;
   }
@@ -250,10 +254,16 @@ class TradingProvider extends ChangeNotifier {
 
   Future<bool> stopBridge() async {
     _logActivity('Sending Stop Bridge command...');
+    _bridgeState = _bridgeState.copyWith(isRunning: false);
+    notifyListeners();
+
     final ok = await api.stopBridge();
     if (ok) {
-      _bridgeState = BridgeState(isRunning: false);
-      notifyListeners();
+      _logActivity('Bridge Stopped');
+      await refreshStatus();
+    } else {
+      _logActivity('Failed to stop bridge.');
+      await refreshStatus();
     }
     return ok;
   }
@@ -261,13 +271,17 @@ class TradingProvider extends ChangeNotifier {
   Future<bool> toggleEmergencyHalt() async {
     if (_bridgeState.emergencyHalt) {
       _logActivity('Resuming from Emergency Halt...');
+      _bridgeState = _bridgeState.copyWith(emergencyHalt: false);
+      notifyListeners();
       final ok = await api.resumeBridge();
-      if (ok) refreshStatus();
+      await refreshStatus();
       return ok;
     } else {
       _logActivity('Activating Emergency Halt...');
+      _bridgeState = _bridgeState.copyWith(emergencyHalt: true);
+      notifyListeners();
       final ok = await api.emergencyHalt();
-      if (ok) refreshStatus();
+      await refreshStatus();
       return ok;
     }
   }
@@ -280,6 +294,41 @@ class TradingProvider extends ChangeNotifier {
       notifyListeners();
     }
     return ok;
+  }
+
+  Future<Map<String, dynamic>> detectMt4() async {
+    return await api.detectMt4();
+  }
+
+  Future<Map<String, dynamic>> connectAccount({
+    required String accountNumber,
+    required String password,
+    required String server,
+    String? terminalPath,
+    bool autoStartBridge = true,
+  }) async {
+    _isLoading = true;
+    _logActivity('Connecting MT4 account #$accountNumber ($server)...');
+    notifyListeners();
+
+    final result = await api.connectAccount(
+      accountNumber: accountNumber,
+      password: password,
+      server: server,
+      terminalPath: terminalPath,
+      autoStartBridge: autoStartBridge,
+    );
+
+    _isLoading = false;
+    if (result['status'] == 'connected') {
+      _logActivity('MetaTrader 4 connected: Account #$accountNumber ($server)');
+      await refreshAccount();
+      await refreshStatus();
+    } else {
+      _logActivity('MT4 connection error: ${result['message'] ?? 'Failed'}');
+      notifyListeners();
+    }
+    return result;
   }
 
   Future<void> selectPair(String pair) async {

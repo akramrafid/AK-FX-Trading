@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import 'glass_card.dart';
 import 'tactile_button.dart';
 import 'tactile_wrapper.dart';
+import 'account_connect_dialog.dart';
 
 class AccountCard extends StatelessWidget {
   const AccountCard({super.key});
@@ -27,7 +28,7 @@ class AccountCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header: Account Title + Exness Broker Badge ────────────
+          // ── Header: Account Title + Interactive MT4 Broker Badge ────
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -47,38 +48,53 @@ class AccountCard extends StatelessWidget {
                 ],
               ),
               Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.accentLime.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    border: Border.all(color: AppColors.accentLime.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: AppColors.accentLime,
-                          shape: BoxShape.circle,
-                        ),
+                child: TactileWrapper(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => const AccountConnectDialog(),
+                    );
+                  },
+                  pressScale: 0.94,
+                  hoverScale: 1.05,
+                  child: Tooltip(
+                    message: 'Click to Connect or Switch MT4 Account',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentLime.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        border: Border.all(color: AppColors.accentLime.withValues(alpha: 0.4)),
                       ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          '${account.company} #${account.accountNumber}',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Segoe UI',
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.accentLime,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: AppColors.accentLime,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              '${account.company} #${account.accountNumber}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Segoe UI',
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.accentLime,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          const Icon(Icons.sync_alt_rounded, size: 12, color: AppColors.accentLime),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -363,7 +379,7 @@ class AccountCard extends StatelessWidget {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.euro_rounded, size: 14, color: AppColors.accentBlue),
+                          const Icon(Icons.attach_money_rounded, size: 14, color: AppColors.accentBlue),
                           const SizedBox(width: 4),
                           Text(
                             account.symbol,

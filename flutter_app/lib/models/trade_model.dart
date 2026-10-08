@@ -272,4 +272,34 @@ class BridgeState {
       mt4Connected: json['mt4_connected'] == true,
     );
   }
+
+  BridgeState copyWith({
+    bool? isRunning,
+    bool? emergencyHalt,
+    String? symbol,
+    String? timeframe,
+    double? balance,
+    int? ordersToday,
+    int? openTrades,
+    String? watchdogState,
+    String? watchdogMessage,
+    String? strategyMode,
+    bool? mt4ProcessRunning,
+    bool? mt4Connected,
+  }) {
+    return BridgeState(
+      isRunning: isRunning ?? this.isRunning,
+      emergencyHalt: emergencyHalt ?? this.emergencyHalt,
+      symbol: symbol ?? this.symbol,
+      timeframe: timeframe ?? this.timeframe,
+      balance: balance ?? this.balance,
+      ordersToday: ordersToday ?? this.ordersToday,
+      openTrades: openTrades ?? this.openTrades,
+      watchdogState: watchdogState ?? this.watchdogState,
+      watchdogMessage: watchdogMessage ?? this.watchdogMessage,
+      strategyMode: strategyMode ?? this.strategyMode,
+      mt4ProcessRunning: mt4ProcessRunning ?? this.mt4ProcessRunning,
+      mt4Connected: mt4Connected ?? this.mt4Connected,
+    );
+  }
 }

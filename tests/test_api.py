@@ -36,15 +36,23 @@ class TestAPIServerComponents(unittest.TestCase):
         bus = EventBus()
         controller = BridgeController(bus)
         
+        from risk.guardrails import RiskGuardrails
+        guardrails = RiskGuardrails()
+        mock_bridge = type("MockBridge", (), {"risk_guardrails": guardrails, "symbol": "USDCADm"})()
+        controller._bridges = [mock_bridge]
+        controller._bridge = mock_bridge
+
         # Halt
         res = controller.emergency_halt()
         self.assertTrue(res["emergency_halt"])
+        self.assertTrue(guardrails.limits.emergency_halt)
         status = controller.get_status()
         self.assertTrue(status["emergency_halt"])
         
         # Resume
         res = controller.resume()
         self.assertFalse(res["emergency_halt"])
+        self.assertFalse(guardrails.limits.emergency_halt)
         status = controller.get_status()
         self.assertFalse(status["emergency_halt"])
 
