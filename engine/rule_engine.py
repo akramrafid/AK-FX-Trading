@@ -115,6 +115,7 @@ class RuleEngine:
         partial_bank_r: Optional[float] = None,
         partial_bank_pct: Optional[float] = None,
         breakeven_trigger_r: Optional[float] = None,
+        enable_intrabar_sweep: bool = False,
     ) -> None:
         self.symbol = symbol
         self.allow_variant_a = allow_variant_a
@@ -147,6 +148,7 @@ class RuleEngine:
         self.partial_bank_r = partial_bank_r
         self.partial_bank_pct = partial_bank_pct
         self.breakeven_trigger_r = breakeven_trigger_r
+        self.enable_intrabar_sweep = enable_intrabar_sweep
 
         # State tracking for multi-timeframe streaming
         self.armed_state: Optional[ArmedState] = None
@@ -179,6 +181,7 @@ class RuleEngine:
         self._h1_closes: List[float] = []
         self.latest_h1_ema: Optional[float] = None
         self._traded_m15_keys: set[datetime] = set()
+        self._traded_m5_keys: set[datetime] = set()
 
     @classmethod
     def institutional_preset(
@@ -226,6 +229,7 @@ class RuleEngine:
             session_end_hour=session_end_hour,
             check_m5=check_m5,
             check_m15=check_m15,
+            enable_intrabar_sweep=True,
             **kwargs,
         )
 
@@ -237,7 +241,7 @@ class RuleEngine:
         allow_variant_b: bool = False,
         anchor_to_key_liquidity: bool = False,
         use_sweep_wick_sl: bool = False,
-        use_c1_only_sl: bool = False,
+        use_c1_only_sl: bool = True,
         min_sweep_pips: float = 0.0,
         min_risk_pips: float = 0.0,
         min_displacement_ratio: float = 0.0,
@@ -254,6 +258,7 @@ class RuleEngine:
         spread_pips: float = 0.0,
         check_m5: bool = True,
         check_m15: bool = True,
+        enable_intrabar_sweep: bool = True,
         **kwargs,
     ) -> RuleEngine:
         """
@@ -287,6 +292,7 @@ class RuleEngine:
             spread_pips=spread_pips,
             check_m5=check_m5,
             check_m15=check_m15,
+            enable_intrabar_sweep=enable_intrabar_sweep,
             **kwargs,
         )
 
@@ -361,6 +367,7 @@ class RuleEngine:
         self.disarm()
         self._htf_history = {"M5": [], "M15": []}
         self._traded_m15_keys = set()
+        self._traded_m5_keys = set()
         self._m1_history = []
         self.asia_high = None
         self.asia_low = None
@@ -413,6 +420,12 @@ class RuleEngine:
         candle = raw_candle if isinstance(raw_candle, Candle) else Candle.from_dict(raw_candle)
         self._update_daily_and_session_levels(candle)
 
+        # Auto-disarm if existing armed state is stale from a previous day or > 2 hours old
+        if self.armed_state is not None:
+            time_diff = candle.timestamp - self.armed_state.armed_at_timestamp
+            if candle.timestamp.date() != self.armed_state.armed_at_timestamp.date() or time_diff > timedelta(hours=2):
+                self.disarm()
+
         if tf in ("H1", "1H", "60"):
             self.on_h1_candle(candle)
             return None
@@ -428,7 +441,7 @@ class RuleEngine:
             return None
 
         history = self._htf_history.setdefault(tf, [])
-        if tf == "M15" and candle.timestamp in self._traded_m15_keys:
+        if (tf == "M15" and candle.timestamp in self._traded_m15_keys) or (tf == "M5" and candle.timestamp in self._traded_m5_keys):
             if not history or candle.timestamp > history[-1].timestamp:
                 history.append(candle)
             elif history and history[-1].timestamp == candle.timestamp:
@@ -508,7 +521,6 @@ class RuleEngine:
                     # Preserve in-progress confirmation streak if already armed in same direction
                     if (
                         self.is_armed
-                        and self.armed_state.sweep_timeframe == tf
                         and self.armed_state.direction == sweep_event.direction
                         and len(self.armed_state.confirming_candles) > 0
                     ):
@@ -539,6 +551,9 @@ class RuleEngine:
         Check if an incoming closed M1 candle pierces/sweeps higher-timeframe levels
         while the higher-timeframe candle is actively forming (intrabar wick sweep).
         """
+        if not self.enable_intrabar_sweep:
+            return False
+
         in_session = True
         if self.session_filter:
             in_session = (self.session_start_hour <= candle.timestamp.hour < self.session_end_hour)
@@ -613,6 +628,42 @@ class RuleEngine:
                             )
                             return True
 
+        # 3. Check M5 Intrabar Sweep
+        if self.check_m5 and len(self._htf_history["M5"]) >= 1:
+            m5_minute = (candle.timestamp.minute // 5) * 5
+            m5_key = candle.timestamp.replace(minute=m5_minute, second=0, microsecond=0)
+            if m5_key not in self._traded_m5_keys:
+                last_m5 = self._htf_history["M5"][-1]
+                if candle.timestamp >= last_m5.timestamp:
+                    # SELL setup: Prior M5 was bullish (or opposite), M1 sweeps above prior high
+                    if self.allow_variant_a and (last_m5.is_bullish or last_m5.close >= last_m5.open):
+                        if candle.high > last_m5.high:
+                            if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close > self.latest_h1_ema):
+                                self.arm(
+                                    direction=Direction.SELL,
+                                    sweep_candle=candle,
+                                    sweep_timeframe="M5",
+                                    swept_level=last_m5.high,
+                                    extreme_price=candle.high,
+                                    sweep_type=SweepType.VARIANT_A.value,
+                                    is_intrabar=True,
+                                )
+                                return True
+                    # BUY setup: Prior M5 was bearish (or opposite), M1 sweeps below prior low
+                    if self.allow_variant_a and (last_m5.is_bearish or last_m5.close <= last_m5.open):
+                        if candle.low < last_m5.low:
+                            if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close < self.latest_h1_ema):
+                                self.arm(
+                                    direction=Direction.BUY,
+                                    sweep_candle=candle,
+                                    sweep_timeframe="M5",
+                                    swept_level=last_m5.low,
+                                    extreme_price=candle.low,
+                                    sweep_type=SweepType.VARIANT_A.value,
+                                    is_intrabar=True,
+                                )
+                                return True
+
         return False
 
     def on_m1_candle(
@@ -636,6 +687,12 @@ class RuleEngine:
         self._m1_history.append(candle)
         if len(self._m1_history) > 100:
             del self._m1_history[:-100]
+
+        # Auto-disarm if existing armed state is stale from a previous day or > 2 hours old
+        if self.armed_state is not None:
+            time_diff = candle.timestamp - self.armed_state.armed_at_timestamp
+            if candle.timestamp.date() != self.armed_state.armed_at_timestamp.date() or time_diff > timedelta(hours=2):
+                self.disarm()
 
         # Update M1 body metrics for displacement
         self._m1_body_sum += candle.body
@@ -717,9 +774,16 @@ class RuleEngine:
             return None
 
         # Ignore 1m candles that closed before or during the sweep candle
-        if self.armed_state.is_intrabar:
-            if candle.timestamp <= self.armed_state.sweep_candle.timestamp:
+        if self.armed_state.is_intrabar or self.enable_intrabar_sweep:
+            if candle.timestamp < self.armed_state.sweep_candle.timestamp:
                 return None
+            elif candle.timestamp == self.armed_state.sweep_candle.timestamp:
+                is_dir_match = (
+                    (self.armed_state.direction == Direction.BUY and candle.close >= candle.open) or
+                    (self.armed_state.direction == Direction.SELL and candle.close <= candle.open)
+                )
+                if not is_dir_match:
+                    return None
         else:
             sweep_delta = TIMEFRAME_DELTAS.get(self.armed_state.sweep_timeframe, timedelta(minutes=5))
             sweep_close_time = self.armed_state.sweep_candle.timestamp + sweep_delta
@@ -773,6 +837,10 @@ class RuleEngine:
                         m15_minute = (self.armed_state.sweep_candle.timestamp.minute // 15) * 15
                         m15_key = self.armed_state.sweep_candle.timestamp.replace(minute=m15_minute, second=0, microsecond=0)
                         self._traded_m15_keys.add(m15_key)
+                    elif self.armed_state.sweep_timeframe == "M5" and self.armed_state.sweep_candle is not None:
+                        m5_minute = (self.armed_state.sweep_candle.timestamp.minute // 5) * 5
+                        m5_key = self.armed_state.sweep_candle.timestamp.replace(minute=m5_minute, second=0, microsecond=0)
+                        self._traded_m5_keys.add(m5_key)
                 self.disarm()
                 if signal is not None:
                     min_risk_distance = self.min_risk_pips * self.pip_size

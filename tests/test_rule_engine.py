@@ -319,7 +319,8 @@ class TestC1WickSwapStrategy(unittest.TestCase):
 
     def test_preset_configuration(self):
         engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD")
-        self.assertFalse(engine.use_c1_only_sl)
+        self.assertTrue(engine.use_c1_only_sl)
+        self.assertTrue(engine.enable_intrabar_sweep)
         self.assertFalse(engine.use_sweep_wick_sl)
         self.assertFalse(engine.anchor_to_key_liquidity)
         self.assertTrue(engine.allow_variant_a)
@@ -711,6 +712,184 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         m15_completed = Candle(timestamp=t_m15, open=1.11880, high=1.11956, low=1.11790, close=1.11800)
         self.assertIsNone(engine.on_htf_candle(m15_completed, timeframe="M15"), "Must not re-arm already traded M15 sweep")
         self.assertFalse(engine.is_armed)
+
+    def test_user_strategy_m5_intrabar_long_trade_c1_only_sl(self):
+        """
+        Exact user strategy for LONG trade:
+        1. Bearish candle's wick swapped by bullish candle's wick on M5, before the bullish candle closes.
+        2. Move to 1-minute timeframe: look for 3 consecutive bullish candles.
+        3. On close of the 3rd bullish candle, immediately place BUY trade.
+        4. Stop Loss is strictly at the bottom of the first consecutive candle (C1 low),
+           even if C2 has a lower low.
+        5. Target is 1:5 Reward-to-Risk ratio.
+        """
+        t0 = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+
+        # Prior M5 candle: Bearish with low 1.08200
+        m5_prev = Candle(timestamp=t0, open=1.08400, high=1.08450, low=1.08200, close=1.08220)
+        engine.on_htf_candle(m5_prev, timeframe="M5")
+
+        # Next M5 candle starts at 09:05.
+        # Minute 09:05: does not sweep yet
+        t_m5 = t0 + timedelta(minutes=5)
+        m1_0 = Candle(timestamp=t_m5, open=1.08220, high=1.08240, low=1.08210, close=1.08230)
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+        self.assertFalse(engine.is_armed)
+
+        # Minute 09:06: Bearish wick swapped by bullish candle's wick before M5 closes (low 1.08150 < 1.08200)
+        # Candle sweeps the low but closes bearish (open 1.08230, close 1.08220), so it does not count as C1 for BUY
+        m1_sweep = Candle(timestamp=t_m5 + timedelta(minutes=1), open=1.08230, high=1.08260, low=1.08150, close=1.08220)
+        self.assertIsNone(engine.on_m1_candle(m1_sweep))
+        self.assertTrue(engine.is_armed, "Must arm immediately intrabar on M5 wick swap")
+        self.assertEqual(engine.armed_state.direction, Direction.BUY)
+        self.assertTrue(engine.armed_state.is_intrabar)
+
+        # 3 consecutive bullish candles on 1-minute timeframe:
+        # C1: low is 1.08210
+        m1_c1 = Candle(timestamp=t_m5 + timedelta(minutes=2), open=1.08250, high=1.08310, low=1.08210, close=1.08290)
+        # C2: low dips to 1.08190 (< C1 low), but closes bullish
+        m1_c2 = Candle(timestamp=t_m5 + timedelta(minutes=3), open=1.08290, high=1.08360, low=1.08190, close=1.08340)
+        # C3: closes bullish at 1.08400
+        m1_c3 = Candle(timestamp=t_m5 + timedelta(minutes=4), open=1.08340, high=1.08420, low=1.08320, close=1.08400)
+
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+        signal = engine.on_m1_candle(m1_c3)
+
+        # Immediately place buy trade
+        self.assertIsNotNone(signal, "Must place BUY trade immediately when 3rd bullish candle closes")
+        self.assertEqual(signal.direction, "BUY")
+        self.assertEqual(signal.entry_price, 1.08400)
+
+        # Stop loss strictly at the bottom of the first consecutive candle (C1 low = 1.08210)
+        expected_sl = 1.08210
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # 1:5 Reward-to-Risk ratio
+        risk = signal.entry_price - signal.stop_loss  # 1.08400 - 1.08210 = 0.00190
+        expected_tp = signal.entry_price + (5.0 * risk)  # 1.08400 + 0.00950 = 1.09350
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+    def test_user_strategy_m5_intrabar_short_trade_c1_only_sl(self):
+        """
+        Exact user strategy for SHORT trade when sweep candle closes bullish (so C1 is subsequent candle):
+        1. Bullish candle's wick swapped by bearish candle's wick on M5, before the bearish candle closes.
+        2. Move to 1-minute timeframe: look for 3 consecutive bearish candles.
+        3. On close of the 3rd bearish candle, immediately place SELL trade.
+        4. Stop Loss is strictly at the top of the first consecutive candle (C1 high).
+        5. Target is 1:5 Reward-to-Risk ratio.
+        """
+        t0 = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="EURUSD", session_filter=False)
+
+        # Prior M5 candle: Bullish with high 1.08500
+        m5_prev = Candle(timestamp=t0, open=1.08300, high=1.08500, low=1.08280, close=1.08480)
+        engine.on_htf_candle(m5_prev, timeframe="M5")
+
+        # Next M5 candle starts at 09:05.
+        t_m5 = t0 + timedelta(minutes=5)
+        m1_0 = Candle(timestamp=t_m5, open=1.08480, high=1.08490, low=1.08460, close=1.08470)
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+        self.assertFalse(engine.is_armed)
+
+        # Minute 09:06: Bullish wick swapped by candle's wick before M5 closes (high 1.08560 > 1.08500)
+        # Candle sweeps the high but closes bullish (open 1.08470, close 1.08480), so it does not count as C1 for SELL
+        m1_sweep = Candle(timestamp=t_m5 + timedelta(minutes=1), open=1.08470, high=1.08560, low=1.08440, close=1.08480)
+        self.assertIsNone(engine.on_m1_candle(m1_sweep))
+        self.assertTrue(engine.is_armed, "Must arm immediately intrabar on M5 wick swap")
+        self.assertEqual(engine.armed_state.direction, Direction.SELL)
+        self.assertTrue(engine.armed_state.is_intrabar)
+
+        # 3 consecutive bearish candles on 1-minute timeframe:
+        # C1: high is 1.08460
+        m1_c1 = Candle(timestamp=t_m5 + timedelta(minutes=2), open=1.08450, high=1.08460, low=1.08380, close=1.08400)
+        # C2: high wicks to 1.08480 (> C1 high), but closes bearish
+        m1_c2 = Candle(timestamp=t_m5 + timedelta(minutes=3), open=1.08400, high=1.08480, low=1.08330, close=1.08350)
+        # C3: closes bearish at 1.08280
+        m1_c3 = Candle(timestamp=t_m5 + timedelta(minutes=4), open=1.08350, high=1.08360, low=1.08270, close=1.08280)
+
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+        signal = engine.on_m1_candle(m1_c3)
+
+        # Immediately place sell trade
+        self.assertIsNotNone(signal, "Must place SELL trade immediately when 3rd bearish candle closes")
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.08280)
+
+        # Stop loss strictly at the top of the first consecutive candle (C1 high = 1.08460)
+        expected_sl = 1.08460
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+        # 1:5 Reward-to-Risk ratio
+        risk = signal.stop_loss - signal.entry_price  # 1.08460 - 1.08280 = 0.00180
+        expected_tp = signal.entry_price - (5.0 * risk)  # 1.08280 - 0.00900 = 1.07380
+        self.assertAlmostEqual(signal.take_profit, expected_tp, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
+
+    def test_usdcad_sweep_candle_is_c1_immediate_sell_setup(self):
+        """
+        Exact user TradingView setup from USDCAD (Reference Images 2 & 3):
+        1. 5m / 15m bullish candle closed at 07:00 (high = 1.42629).
+        2. Next candle opens and is forming.
+        3. In 1m timeframe:
+           - 07:02: 1m candle's high wick (1.42635) swaps the prior bullish candle's wick (1.42629)
+             AND closes bearish (open 1.42630, close 1.42610).
+             This candle IS the 1st consecutive bearish candle (C1)!
+           - 07:03: 2nd consecutive bearish candle (open 1.42608, close 1.42605).
+           - 07:04: 3rd consecutive bearish candle (open 1.42604, close 1.42598).
+        4. When the 3rd bearish candle closes at 07:04:
+           - Immediately place SELL trade!
+           - Entry price = 1.42598 (close of 3rd candle).
+           - Stop loss strictly at top of first bearish candle (C1 high = 1.42635).
+           - 1:5 Reward-to-Risk ratio -> TP = 1.42598 - 5 * (1.42635 - 1.42598) = 1.42413.
+        """
+        t0 = datetime(2026, 10, 8, 6, 55, tzinfo=timezone.utc)
+        engine = RuleEngine.c1_wickswap_preset(symbol="USDCAD", session_filter=False)
+
+        # Prior M5 candle (06:55): Bullish with high 1.42629
+        m5_prev = Candle(timestamp=t0, open=1.42603, high=1.42629, low=1.42598, close=1.42626)
+        engine.on_htf_candle(m5_prev, timeframe="M5")
+
+        t_m5 = datetime(2026, 10, 8, 7, 0, tzinfo=timezone.utc)
+        # 07:00 M1: doesn't sweep
+        m1_0 = Candle(timestamp=t_m5, open=1.42625, high=1.42626, low=1.42596, close=1.42618)
+        self.assertIsNone(engine.on_m1_candle(m1_0))
+
+        # 07:01 M1: doesn't sweep
+        m1_1 = Candle(timestamp=t_m5 + timedelta(minutes=1), open=1.42617, high=1.42629, low=1.42616, close=1.42628)
+        self.assertIsNone(engine.on_m1_candle(m1_1))
+
+        # 07:02 M1 (C1): Wick swaps bullish candle's high (1.42635 > 1.42629) AND closes bearish (1.42610 < 1.42630)
+        m1_c1 = Candle(timestamp=t_m5 + timedelta(minutes=2), open=1.42630, high=1.42635, low=1.42607, close=1.42610)
+        self.assertIsNone(engine.on_m1_candle(m1_c1))
+        self.assertTrue(engine.is_armed, "Must arm on sweep")
+        self.assertEqual(len(engine.armed_state.confirming_candles), 1, "C1 must be registered immediately")
+
+        # 07:03 M1 (C2): 2nd consecutive bearish candle
+        m1_c2 = Candle(timestamp=t_m5 + timedelta(minutes=3), open=1.42608, high=1.42614, low=1.42600, close=1.42605)
+        self.assertIsNone(engine.on_m1_candle(m1_c2))
+        self.assertEqual(len(engine.armed_state.confirming_candles), 2)
+
+        # 07:04 M1 (C3): 3rd consecutive bearish candle
+        m1_c3 = Candle(timestamp=t_m5 + timedelta(minutes=4), open=1.42604, high=1.42605, low=1.42597, close=1.42598)
+        signal = engine.on_m1_candle(m1_c3)
+
+        self.assertIsNotNone(signal, "Must place SELL trade immediately when 3rd bearish candle closes at 07:04")
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.42598)
+
+        # Stop loss strictly at top of first bearish candle (C1 high = 1.42635)
+        self.assertEqual(signal.stop_loss, 1.42635)
+
+        # 1:5 Reward-to-Risk ratio:
+        # Risk = 1.42635 - 1.42598 = 0.00037
+        # Reward = 5 * 0.00037 = 0.00185
+        # TP = 1.42598 - 0.00185 = 1.42413
+        self.assertAlmostEqual(signal.take_profit, 1.42413, places=5)
+        self.assertEqual(signal.reward_risk_ratio, 5.0)
 
 
 if __name__ == "__main__":
