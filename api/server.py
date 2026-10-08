@@ -482,8 +482,8 @@ class BridgeController:
                             check_m15=True,
                             session_filter=cfg.session_filter_enabled,
                             session_start_hour=cfg.session_start_hour,
-                            session_end_hour=cfg.session_end_hour,
-                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", False),
+                            spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
+                            enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
                         )
                     else:
                         engine = RuleEngine.institutional_preset(

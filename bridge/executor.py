@@ -217,6 +217,25 @@ class BridgeExecutor:
         3. If 3 consecutive confirming 1m candles complete, calculates dynamic position size,
            evaluates non-bypassable risk guardrails, logs to database, and executes market order via DWXClient.
         """
+        # 0. Sync live spread from DWX account info if available
+        acc_info = self.dwx_client.read_account_info()
+        if isinstance(acc_info, dict):
+            live_spread = None
+            if "pairs" in acc_info and isinstance(acc_info["pairs"], dict) and self.symbol in acc_info["pairs"]:
+                pair_data = acc_info["pairs"][self.symbol]
+                if isinstance(pair_data, dict) and "spread_pips" in pair_data:
+                    try:
+                        live_spread = float(pair_data["spread_pips"])
+                    except (ValueError, TypeError):
+                        pass
+            elif "spread_pips" in acc_info:
+                try:
+                    live_spread = float(acc_info["spread_pips"])
+                except (ValueError, TypeError):
+                    pass
+            if live_spread is not None and live_spread > 0:
+                self.rule_engine.spread_pips = live_spread
+
         # 1. Process M15 bars (if present)
         m15_bars = self.dwx_client.read_closed_bars(self.symbol, m15_timeframe)
         if m15_bars:

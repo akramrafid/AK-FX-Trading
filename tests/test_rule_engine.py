@@ -928,8 +928,84 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         self.assertIsNone(engine.on_htf_candle(m5_closed_no_sweep, timeframe="M5"))
         self.assertFalse(engine.is_armed, "Must NOT arm if closed M5 did not swap wick")
 
+    def test_spread_buffer_on_sell_stop_loss(self):
+        """
+        For SELL orders, MT4 stops out at Ask (Bid + Spread).
+        When spread_pips > 0 is configured, the stop loss must be placed at
+        c1.high + spread_price to prevent premature knockout from spread.
+        """
+        engine = RuleEngine.c1_wickswap_preset(
+            symbol="USDCAD",
+            spread_pips=1.8,
+            enable_intrabar_sweep=True,
+            session_filter=False,
+        )
+        t0 = datetime(2026, 10, 8, 13, 0, tzinfo=timezone.utc)
+        # Prior M15 bullish with high 1.42650
+        prev_m15 = Candle(timestamp=t0, open=1.42600, high=1.42650, low=1.42590, close=1.42645)
+        engine.on_htf_candle(prev_m15, timeframe="M15")
+
+        # Intrabar sweep at 13:22 (high 1.42660 sweeps 1.42650)
+        t_sweep = t0 + timedelta(minutes=22)
+        m1_sweep = Candle(timestamp=t_sweep, open=1.42630, high=1.42660, low=1.42620, close=1.42635)
+        engine.on_m1_candle(m1_sweep)
+        self.assertTrue(engine.is_armed)
+        self.assertEqual(engine.armed_state.direction, Direction.SELL)
+
+        # 3 confirming bearish candles (C1, C2, C3)
+        c1 = Candle(timestamp=t_sweep + timedelta(minutes=1), open=1.42656, high=1.42656, low=1.42640, close=1.42642)
+        c2 = Candle(timestamp=t_sweep + timedelta(minutes=2), open=1.42642, high=1.42645, low=1.42625, close=1.42628)
+        c3 = Candle(timestamp=t_sweep + timedelta(minutes=3), open=1.42628, high=1.42630, low=1.42610, close=1.42614)
+
+        engine.on_m1_candle(c1)
+        engine.on_m1_candle(c2)
+        signal = engine.on_m1_candle(c3)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.direction, "SELL")
+        self.assertEqual(signal.entry_price, 1.42614)
+        # C1 High = 1.42656, Spread 1.8 pips (0.00018) -> SL = 1.42656 + 0.00018 = 1.42674
+        expected_sl = round(1.42656 + 1.8 * 0.0001, 5)
+        self.assertAlmostEqual(signal.stop_loss, expected_sl, places=5)
+
+    def test_m15_intrabar_sweep_blocks_counter_trend_m5_sweep(self):
+        """
+        When M15 arms a SELL setup intrabar, a minor M5 micro-dip within that 15-minute
+        window must NOT trigger a counter-trend BUY setup.
+        """
+        engine = RuleEngine.c1_wickswap_preset(
+            symbol="USDCAD",
+            enable_intrabar_sweep=True,
+            session_filter=False,
+        )
+        t0 = datetime(2026, 10, 8, 13, 0, tzinfo=timezone.utc)
+        # M15 high 1.42650
+        prev_m15 = Candle(timestamp=t0, open=1.42600, high=1.42650, low=1.42590, close=1.42645)
+        engine.on_htf_candle(prev_m15, timeframe="M15")
+
+        # Also provide M5 history
+        m5_bar = Candle(timestamp=t0 + timedelta(minutes=15), open=1.42620, high=1.42640, low=1.42610, close=1.42615)
+        engine.on_htf_candle(m5_bar, timeframe="M5")
+
+        # M1 at 13:22 sweeps M15 high
+        m1_sweep = Candle(timestamp=t0 + timedelta(minutes=22), open=1.42630, high=1.42660, low=1.42620, close=1.42635)
+        engine.on_m1_candle(m1_sweep)
+        self.assertTrue(engine.is_armed)
+        self.assertEqual(engine.armed_state.direction, Direction.SELL)
+        self.assertEqual(engine._last_htf_sweep_direction, Direction.SELL)
+        self.assertEqual(engine._last_htf_sweep_tf, "M15")
+
+        # Now suppose engine disarms or resets, and at 13:28 M1 dips below an M5 low
+        engine.disarm()
+        # M1 dips below m5_bar.low (1.42610) at 13:28 (within 15 mins of M15 sweep at 13:22)
+        m1_dip = Candle(timestamp=t0 + timedelta(minutes=28), open=1.42615, high=1.42618, low=1.42605, close=1.42608)
+        engine.on_m1_candle(m1_dip)
+        # Should NOT arm BUY because M15 SELL sweep hierarchy is in effect
+        self.assertFalse(engine.is_armed, "Must NOT arm counter-trend BUY while M15 SELL sweep cycle is active")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

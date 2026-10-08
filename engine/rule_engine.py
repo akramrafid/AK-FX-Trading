@@ -182,6 +182,9 @@ class RuleEngine:
         self.latest_h1_ema: Optional[float] = None
         self._traded_m15_keys: set[datetime] = set()
         self._traded_m5_keys: set[datetime] = set()
+        self._last_htf_sweep_direction: Optional[Direction] = None
+        self._last_htf_sweep_tf: Optional[str] = None
+        self._last_htf_sweep_time: Optional[datetime] = None
 
     @classmethod
     def institutional_preset(
@@ -387,6 +390,9 @@ class RuleEngine:
         self._h1_candles = []
         self._h1_closes = []
         self.latest_h1_ema = None
+        self._last_htf_sweep_direction = None
+        self._last_htf_sweep_tf = None
+        self._last_htf_sweep_time = None
 
     def _coerce_candles(self, raw_candles: Sequence[Union[Candle, Dict[str, Any]]]) -> List[Candle]:
         """Convert input sequence into a list of verified Candle objects."""
@@ -516,6 +522,22 @@ class RuleEngine:
                     sweep_event = None
 
             if sweep_event is not None:
+                if tf == "M15":
+                    self._last_htf_sweep_direction = sweep_event.direction
+                    self._last_htf_sweep_tf = "M15"
+                    self._last_htf_sweep_time = candle.timestamp
+                elif tf == "M5":
+                    # Timeframe hierarchy: Do not allow counter-trend M5 sweep if an M15 sweep is active within the last 15 minutes
+                    if (
+                        self._last_htf_sweep_direction is not None
+                        and self._last_htf_sweep_tf == "M15"
+                        and self._last_htf_sweep_time is not None
+                        and candle.timestamp < self._last_htf_sweep_time + timedelta(minutes=15)
+                        and sweep_event.direction != self._last_htf_sweep_direction
+                    ):
+                        sweep_event = None
+
+            if sweep_event is not None:
                 # Priority protection: Do not overwrite an active M15 armed setup with a lower timeframe (M5) sweep
                 if not (self.is_armed and self.armed_state.sweep_timeframe == "M15" and tf == "M5"):
                     # Preserve in-progress confirmation streak if already armed in same direction
@@ -566,6 +588,9 @@ class RuleEngine:
             if (self.asia_high is not None and candle.high > (self.asia_high + min_dist)) or \
                (self.pdh is not None and candle.high > (self.pdh + min_dist)):
                 swept_lvl = self.asia_high if (self.asia_high is not None and candle.high > self.asia_high) else self.pdh
+                self._last_htf_sweep_direction = Direction.SELL
+                self._last_htf_sweep_tf = "M15"
+                self._last_htf_sweep_time = candle.timestamp
                 self.arm(
                     direction=Direction.SELL,
                     sweep_candle=candle,
@@ -579,6 +604,9 @@ class RuleEngine:
             elif (self.asia_low is not None and candle.low < (self.asia_low - min_dist)) or \
                  (self.pdl is not None and candle.low < (self.pdl - min_dist)):
                 swept_lvl = self.asia_low if (self.asia_low is not None and candle.low < self.asia_low) else self.pdl
+                self._last_htf_sweep_direction = Direction.BUY
+                self._last_htf_sweep_tf = "M15"
+                self._last_htf_sweep_time = candle.timestamp
                 self.arm(
                     direction=Direction.BUY,
                     sweep_candle=candle,
@@ -603,6 +631,9 @@ class RuleEngine:
                 if self.allow_variant_a and (last_m15.is_bullish or last_m15.close >= last_m15.open):
                     if candle.high > last_m15.high:
                         if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close > self.latest_h1_ema):
+                            self._last_htf_sweep_direction = Direction.SELL
+                            self._last_htf_sweep_tf = "M15"
+                            self._last_htf_sweep_time = candle.timestamp
                             self.arm(
                                 direction=Direction.SELL,
                                 sweep_candle=candle,
@@ -617,6 +648,9 @@ class RuleEngine:
                 if self.allow_variant_a and (last_m15.is_bearish or last_m15.close <= last_m15.open):
                     if candle.low < last_m15.low:
                         if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close < self.latest_h1_ema):
+                            self._last_htf_sweep_direction = Direction.BUY
+                            self._last_htf_sweep_tf = "M15"
+                            self._last_htf_sweep_time = candle.timestamp
                             self.arm(
                                 direction=Direction.BUY,
                                 sweep_candle=candle,
@@ -638,31 +672,53 @@ class RuleEngine:
                     # SELL setup: Prior M5 was bullish (or opposite), M1 sweeps above prior high
                     if self.allow_variant_a and (last_m5.is_bullish or last_m5.close >= last_m5.open):
                         if candle.high > last_m5.high:
-                            if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close > self.latest_h1_ema):
-                                self.arm(
-                                    direction=Direction.SELL,
-                                    sweep_candle=candle,
-                                    sweep_timeframe="M5",
-                                    swept_level=last_m5.high,
-                                    extreme_price=candle.high,
-                                    sweep_type=SweepType.VARIANT_A.value,
-                                    is_intrabar=True,
-                                )
-                                return True
+                            # Timeframe hierarchy: Do not allow counter-trend M5 sweep if an M15 sweep is active within 15 minutes
+                            if not (
+                                self._last_htf_sweep_direction is not None
+                                and self._last_htf_sweep_tf == "M15"
+                                and self._last_htf_sweep_time is not None
+                                and candle.timestamp < self._last_htf_sweep_time + timedelta(minutes=15)
+                                and Direction.SELL != self._last_htf_sweep_direction
+                            ):
+                                if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close > self.latest_h1_ema):
+                                    self._last_htf_sweep_direction = Direction.SELL
+                                    self._last_htf_sweep_tf = "M5"
+                                    self._last_htf_sweep_time = candle.timestamp
+                                    self.arm(
+                                        direction=Direction.SELL,
+                                        sweep_candle=candle,
+                                        sweep_timeframe="M5",
+                                        swept_level=last_m5.high,
+                                        extreme_price=candle.high,
+                                        sweep_type=SweepType.VARIANT_A.value,
+                                        is_intrabar=True,
+                                    )
+                                    return True
                     # BUY setup: Prior M5 was bearish (or opposite), M1 sweeps below prior low
                     if self.allow_variant_a and (last_m5.is_bearish or last_m5.close <= last_m5.open):
                         if candle.low < last_m5.low:
-                            if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close < self.latest_h1_ema):
-                                self.arm(
-                                    direction=Direction.BUY,
-                                    sweep_candle=candle,
-                                    sweep_timeframe="M5",
-                                    swept_level=last_m5.low,
-                                    extreme_price=candle.low,
-                                    sweep_type=SweepType.VARIANT_A.value,
-                                    is_intrabar=True,
-                                )
-                                return True
+                            # Timeframe hierarchy: Do not allow counter-trend M5 sweep if an M15 sweep is active within 15 minutes
+                            if not (
+                                self._last_htf_sweep_direction is not None
+                                and self._last_htf_sweep_tf == "M15"
+                                and self._last_htf_sweep_time is not None
+                                and candle.timestamp < self._last_htf_sweep_time + timedelta(minutes=15)
+                                and Direction.BUY != self._last_htf_sweep_direction
+                            ):
+                                if not (self.h1_trend_filter and self.latest_h1_ema is not None and candle.close < self.latest_h1_ema):
+                                    self._last_htf_sweep_direction = Direction.BUY
+                                    self._last_htf_sweep_tf = "M5"
+                                    self._last_htf_sweep_time = candle.timestamp
+                                    self.arm(
+                                        direction=Direction.BUY,
+                                        sweep_candle=candle,
+                                        sweep_timeframe="M5",
+                                        swept_level=last_m5.low,
+                                        extreme_price=candle.low,
+                                        sweep_type=SweepType.VARIANT_A.value,
+                                        is_intrabar=True,
+                                    )
+                                    return True
 
         return False
 
