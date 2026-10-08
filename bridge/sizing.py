@@ -37,7 +37,7 @@ class PositionSizer:
     def __init__(
         self,
         account_currency: str = "USD",
-        default_risk_pct: Decimal = Decimal("0.015"),
+        default_risk_pct: Decimal = Decimal("0.01"),
         min_lot: Decimal = Decimal("0.01"),
         max_lot: Decimal = Decimal("50.00"),
         lot_step: Decimal = Decimal("0.01"),
@@ -99,7 +99,7 @@ class PositionSizer:
                 if "JPY" in fx_root:
                     rate = Decimal("150.00")
                 elif "CAD" in fx_root:
-                    rate = Decimal("1.35")
+                    rate = Decimal("1.4250")
                 elif "CHF" in fx_root:
                     rate = Decimal("0.90")
                 else:
@@ -163,7 +163,11 @@ class PositionSizer:
         risk_amount = (account_balance * risk).quantize(Decimal("0.01"))
         pip_val = self.get_pip_value_usd(symbol, rates=rates, current_price=current_price)
 
-        total_risk_per_lot = stop_pips * pip_val
+        # Enforce minimum effective stop distance of 1.5 pips to prevent micro-stops
+        # (e.g. 0.2 pips) from producing oversized lots that exceed account margin (MT4 err 134)
+        # and ensure maximum sizing on tight stops does not exceed 1 pip ≈ $1 USD.
+        effective_stop_pips = max(stop_pips, Decimal("1.5"))
+        total_risk_per_lot = effective_stop_pips * pip_val
         raw_lots = risk_amount / total_risk_per_lot
 
         # Round down to nearest lot_step (0.01)

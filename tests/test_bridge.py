@@ -236,6 +236,57 @@ class TestPositionSizer(unittest.TestCase):
         self.assertTrue(res.is_valid)
         self.assertEqual(res.lots, Decimal("50.00"))
 
+    def test_pip_value_usd_usdcad(self) -> None:
+        # Base USD, Quote CAD at current price 1.42649 (as in Myfxbook calculator):
+        # 100,000 * 0.0001 / 1.42649 = $7.01021 USD/pip
+        pip_val = self.sizer.get_pip_value_usd("USDCAD", current_price=Decimal("1.42649"))
+        self.assertEqual(pip_val, Decimal("7.01"))
+        pip_val_m = self.sizer.get_pip_value_usd("USDCADm", current_price=Decimal("1.42649"))
+        self.assertEqual(pip_val_m, Decimal("7.01"))
+
+    def test_calculate_lots_usdcad_1pct_risk(self) -> None:
+        # Account balance = $150.65, 1% risk = $1.51 USD
+        # Rate: 1.42649 -> Pip value = $7.0102 USD/lot
+        # 1.5 pip stop loss -> Raw lots = 1.51 / (1.5 * 7.01) = 0.1436 -> 0.14 lots
+        # 0.14 lots * $7.01/pip = $0.9814/pip (approx $1/pip!)
+        # Total risk = 0.14 * 1.5 * 7.01 = $1.47 <= $1.51 (1% risk)
+        res = self.sizer.calculate_lots(
+            account_balance=Decimal("150.65"),
+            stop_pips=Decimal("1.5"),
+            symbol="USDCADm",
+            risk_pct=Decimal("0.01"),
+            current_price=Decimal("1.42649"),
+        )
+        self.assertTrue(res.is_valid)
+        self.assertEqual(res.lots, Decimal("0.14"))
+        self.assertEqual(res.risk_amount, Decimal("1.51"))
+
+    def test_calculate_lots_usdcad_micro_stop_clamped(self) -> None:
+        # If stop loss is micro (e.g. 0.2 pips), it clamps to 1.5 pips
+        # Prevents error 134 margin rejections while capping lots at 0.14
+        res = self.sizer.calculate_lots(
+            account_balance=Decimal("150.65"),
+            stop_pips=Decimal("0.2"),
+            symbol="USDCADm",
+            risk_pct=Decimal("0.01"),
+            current_price=Decimal("1.42649"),
+        )
+        self.assertTrue(res.is_valid)
+        self.assertEqual(res.lots, Decimal("0.14"))
+
+    def test_calculate_lots_usdcad_larger_stop_scales_down(self) -> None:
+        # With a 3.0 pip stop loss, lots scale down to maintain 1% risk:
+        # 1.51 / (3.0 * 7.01) = 0.0718 -> 0.07 lots
+        res = self.sizer.calculate_lots(
+            account_balance=Decimal("150.65"),
+            stop_pips=Decimal("3.0"),
+            symbol="USDCADm",
+            risk_pct=Decimal("0.01"),
+            current_price=Decimal("1.42649"),
+        )
+        self.assertTrue(res.is_valid)
+        self.assertEqual(res.lots, Decimal("0.07"))
+
 
 class TestBridgeExecutor(unittest.TestCase):
     """Integration test suite for BridgeExecutor live loop."""

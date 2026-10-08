@@ -106,7 +106,7 @@ class BridgeExecutor:
         db: Optional[TradingDatabase] = None,
         timeframe: str = "M5",
         initial_balance: Decimal = Decimal("10000.00"),
-        risk_pct: Decimal = Decimal("0.015"),
+        risk_pct: Decimal = Decimal("0.01"),
         confirmation_timeout_sec: float = 10.0,
         exchange_rates: Optional[Dict[str, Decimal]] = None,
         on_signal_callback: Optional[Callable[[TradeSignal], None]] = None,
@@ -367,6 +367,15 @@ class BridgeExecutor:
         entry_dec = Decimal(str(round(signal.entry_price, 5)))
         sl_dec = Decimal(str(round(signal.stop_loss, 5)))
         tp_dec = Decimal(str(round(signal.take_profit, 5)))
+        # Dynamic balance synchronization from live MT4 state
+        acc_info = self.dwx_client.read_account_info()
+        if isinstance(acc_info, dict) and "balance" in acc_info:
+            try:
+                live_bal = Decimal(str(acc_info["balance"]))
+                if live_bal > Decimal("0"):
+                    self.balance = live_bal
+            except Exception as e:
+                logger.debug(f"Could not parse live balance from acc_info: {e}")
 
         # Dynamic lot sizing
         stop_pips = self.position_sizer.price_diff_to_pips(self.symbol, signal.risk_distance)

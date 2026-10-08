@@ -58,7 +58,7 @@ class AppConfig:
     timeframe: str = "M5"
     strategy_mode: str = "c1_wickswap"  # "c1_wickswap" (test strategy) or "institutional"
     initial_balance: Decimal = Decimal("10000.00")
-    risk_pct: Decimal = Decimal("0.015")  # 1.5%
+    risk_pct: Decimal = Decimal("0.01")  # 1.0%
 
     # Risk Guardrails
     max_daily_loss_pct: Optional[Decimal] = Decimal("0.03")  # None = unlimited / disabled
@@ -137,7 +137,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         timeframe=get_var("TRADING_TIMEFRAME", "M5").upper(),
         strategy_mode=get_var("STRATEGY_MODE", "c1_wickswap").strip().lower(),
         initial_balance=Decimal(get_var("ACCOUNT_INITIAL_BALANCE", "10000.00")),
-        risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.015")),
+        risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.01")),
         max_daily_loss_pct=max_daily_loss_pct_val,
         max_open_trades=int(get_var("MAX_OPEN_TRADES", "1")),
         max_daily_trades=max_daily_trades_val,
