@@ -12,7 +12,7 @@ interface MetricsBarProps {
 export const MetricsBar: React.FC<MetricsBarProps> = ({ account, riskPct = 0.01 }) => {
   // Calculate dynamic lot sizing based on account balance & risk
   // In C1 Wick-Swap on USDCAD (SL ~ 4-5 pips avg = 45 points), 1% on $492 is ~$4.92 risk -> ~0.11 lots
-  const riskAmount = (account.balance || 492.85) * riskPct;
+  const riskAmount = (account.balance || 0) * riskPct;
   const estimatedLotSize = Math.max(0.01, Math.round(((riskAmount / 45) * 100)) / 100);
 
   const isProfitPositive = account.profit >= 0;
@@ -98,7 +98,7 @@ export const MetricsBar: React.FC<MetricsBarProps> = ({ account, riskPct = 0.01 
           <span className="text-[10px] font-mono text-slate-400">1:{account.leverage || 200}</span>
         </div>
         <div className="text-sm font-bold text-slate-200 truncate font-mono">
-          #{account.account_number}
+          ID: {account.account_number}
         </div>
         <div className="text-[11px] text-slate-500 truncate">
           {account.company || 'Exness-Real21'}

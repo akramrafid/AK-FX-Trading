@@ -125,7 +125,7 @@ export const RiskGuardrailsCard: React.FC<RiskProps> = ({
           <span className="w-2 h-2 rounded-full bg-accent-green animate-ping" />
           <span>Sync &lt; 1.0s</span>
           <span className="text-slate-500">•</span>
-          <span className="text-slate-400">{status.watchdog?.bars_processed || 120} bars verified</span>
+          <span className="text-slate-400">{status.watchdog?.bars_processed ?? 0} bars verified</span>
         </div>
       </div>
     </div>

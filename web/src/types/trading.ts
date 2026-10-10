@@ -22,6 +22,20 @@ export interface AccountInfo {
   trades_today?: number;
 }
 
+export interface UserAccount {
+  id: string;
+  account_number: string;
+  broker: string;
+  server: string;
+  name?: string;
+  currency?: string;
+  balance?: number;
+  equity?: number;
+  leverage?: number;
+  is_active?: boolean;
+  created_at?: string;
+}
+
 export interface Position {
   ticket: number;
   symbol: string;

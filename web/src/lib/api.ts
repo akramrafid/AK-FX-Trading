@@ -40,8 +40,9 @@ export const api = {
     return fetchJson('/api/account/detect');
   },
 
-  async getTrades(): Promise<Position[]> {
-    return fetchJson<Position[]>('/api/trades');
+  async getTrades(account?: string | number): Promise<Position[]> {
+    const query = account ? `?account=${account}` : '';
+    return fetchJson<Position[]>(`/api/trades${query}`);
   },
 
   async getSignals(): Promise<TradingSignal[]> {
@@ -92,6 +93,9 @@ export const api = {
     account_number: string;
     password?: string;
     server?: string;
+    broker?: string;
+    balance?: number;
+    leverage?: number;
     terminal_path?: string;
   }): Promise<{ status: string; message: string }> {
     return fetchJson('/api/account/connect', {

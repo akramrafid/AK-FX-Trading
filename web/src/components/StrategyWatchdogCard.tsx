@@ -60,7 +60,7 @@ export const StrategyWatchdogCard: React.FC<StrategyProps> = ({ status, strategy
             Watchdog Supervisor Status
           </span>
           <span className="font-mono text-white font-bold">
-            {status.watchdog?.state || 'HEALTHY'} ({status.watchdog?.bars_processed || 120} bars)
+            {status.watchdog?.state || 'HEALTHY'} ({status.watchdog?.bars_processed ?? 0} bars)
           </span>
         </div>
       </div>

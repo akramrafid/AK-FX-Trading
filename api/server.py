@@ -1000,8 +1000,8 @@ class APIHandler(BaseHTTPRequestHandler):
                                 "sl": sl,
                                 "tp": tp,
                                 "profit": pnl,
-                                "comment": "AK-AI TrendWise M5",
-                                "open_time": rep.get("timestamp", "2026-10-08 07:04:00"),
+                                "comment": rep.get("comment", "C1 Wick-Swap M5"),
+                                "open_time": rep.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")),
                             })
                             seen_tickets.add(ticket)
                     except Exception:
@@ -1015,8 +1015,8 @@ class APIHandler(BaseHTTPRequestHandler):
             margin_level = round((equity / margin_used * 100), 1) if margin_used > 0 else 0.0
 
             return {
-                "account_number": 70702138,
-                "company": "Exness",
+                "account_number": int(os.getenv("ACCOUNT_NUMBER", "69800896")),
+                "company": os.getenv("ACCOUNT_SERVER", "Exness Technologies Ltd"),
                 "account_name": "Standard MT4",
                 "currency": "USD",
                 "balance": balance,
@@ -1051,8 +1051,8 @@ class APIHandler(BaseHTTPRequestHandler):
         # Fallback to defaults
         balance = float(getattr(self.controller._config, "initial_balance", 500)) if self.controller._config else 500.0
         return {
-            "account_number": 70702138,
-            "company": "Exness",
+            "account_number": int(os.getenv("ACCOUNT_NUMBER", "69800896")),
+            "company": os.getenv("ACCOUNT_SERVER", "Exness Technologies Ltd"),
             "account_name": "Standard MT4",
             "currency": "USD",
             "balance": balance,
@@ -1073,67 +1073,148 @@ class APIHandler(BaseHTTPRequestHandler):
         }
 
     def _get_trades(self) -> List[Dict[str, Any]]:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        account_filter = qs.get("account", [None])[0]
+        status_filter = qs.get("status", ["all"])[0].lower()
+        limit_val = int(qs.get("limit", [100])[0])
+
         trades: List[Dict[str, Any]] = []
         open_tickets = set()
 
-        # Open orders from live MT4 state
         acc_info = self._read_mt4_account_info()
-        if acc_info and "orders" in acc_info:
-            for o in acc_info["orders"]:
-                ticket = o.get("ticket", 0)
-                trades.append({
-                    "magic": o.get("magic", 92412501),
-                    "ticket": ticket,
-                    "symbol": o.get("symbol", "USDCADm"),
-                    "direction": o.get("type", "BUY"),
-                    "lots": o.get("lots", 0.11),
-                    "entry_price": o.get("open_price", 0.0),
-                    "current_price": o.get("current_price", 0.0),
-                    "sl_price": o.get("sl", 0.0),
-                    "tp_price": o.get("tp", 0.0),
-                    "pnl": o.get("profit", 0.0),
-                    "status": "FILLED",
-                    "comment": o.get("comment", ""),
-                    "created_at": o.get("open_time", datetime.now(timezone.utc).isoformat()),
-                })
-                open_tickets.add(ticket)
+        default_acc_num = int(os.getenv("ACCOUNT_NUMBER", "69800896"))
+        active_account = acc_info.get("account_number", default_acc_num) if acc_info else default_acc_num
 
-        # Historical / filled orders from SQLite database
-        seen_tickets = set(open_tickets)
-        db = self._get_db()
-        if db is not None:
-            try:
-                import sqlite3
-                conn = sqlite3.connect(self.db_path)
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 50")
-                for r in cursor.fetchall():
-                    d = dict(r)
-                    ticket = d.get("ticket") or 0
-                    if ticket not in seen_tickets:
-                        status = "CLOSED" if ticket not in open_tickets else d.get("status", "FILLED")
-                        hist_pnl = float(d.get("pnl") or 0.0)
-                        if status == "CLOSED" and hist_pnl == 0.0:
-                            hist_pnl = -7.15
-                        trades.append({
-                            "magic": d.get("magic_number", 0),
-                            "ticket": ticket,
-                            "symbol": d.get("symbol", "USDCADm"),
-                            "direction": d.get("direction", "BUY"),
-                            "lots": float(d.get("lots", 0.0)),
-                            "entry_price": float(d.get("fill_price") or d.get("target_entry") or 0.0),
-                            "current_price": float(d.get("fill_price") or d.get("target_entry") or 0.0),
-                            "sl_price": float(d.get("stop_loss") or 0.0),
-                            "tp_price": float(d.get("take_profit") or 0.0),
-                            "pnl": hist_pnl,
-                            "status": status,
-                            "created_at": d.get("created_at", ""),
-                        })
-                        seen_tickets.add(ticket)
-                conn.close()
-            except Exception as e:
-                logger.error(f"DB query error: {e}")
+        # 1. Running / open orders from live MT4 state
+        if status_filter in ("all", "running", "open"):
+            if acc_info and "orders" in acc_info:
+                for o in acc_info["orders"]:
+                    ticket = o.get("ticket", 0)
+                    ord_acc = o.get("account_number", active_account)
+                    if account_filter is not None and str(ord_acc) != str(account_filter):
+                        continue
+                    direction = str(o.get("type", "BUY")).upper()
+                    open_price = float(o.get("open_price", 0.0))
+                    current_price = float(o.get("current_price", open_price))
+                    lots = float(o.get("lots", 0.10))
+                    pnl = float(o.get("profit", 0.0))
+                    pips = round((current_price - open_price) * 10000.0, 1) if "BUY" in direction else round((open_price - current_price) * 10000.0, 1)
+                    trades.append({
+                        "magic": o.get("magic", 92412501),
+                        "ticket": ticket,
+                        "account_number": ord_acc,
+                        "symbol": o.get("symbol", "USDCADm"),
+                        "direction": direction,
+                        "lots": lots,
+                        "entry_price": open_price,
+                        "current_price": current_price,
+                        "close_price": None,
+                        "sl_price": float(o.get("sl", 0.0)),
+                        "tp_price": float(o.get("tp", 0.0)),
+                        "pnl": pnl,
+                        "pips": pips,
+                        "status": "RUNNING",
+                        "exit_reason": "RUNNING",
+                        "comment": o.get("comment", ""),
+                        "created_at": o.get("open_time", datetime.now(timezone.utc).isoformat()),
+                        "closed_at": None,
+                    })
+                    open_tickets.add(ticket)
+
+        # 2. Historical / closed trade journal from SQLite database
+        if status_filter in ("all", "closed", "history"):
+            db = self._get_db()
+            if db is not None:
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self.db_path)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+
+                    # Query trade_journal first
+                    if account_filter is not None:
+                        cursor.execute(
+                            "SELECT * FROM trade_journal WHERE account_number = ? ORDER BY open_time DESC LIMIT ?",
+                            (int(account_filter), limit_val),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM trade_journal ORDER BY open_time DESC LIMIT ?",
+                            (limit_val,),
+                        )
+                    journal_rows = cursor.fetchall()
+
+                    if journal_rows:
+                        for r in journal_rows:
+                            d = dict(r)
+                            ticket = d.get("ticket") or 0
+                            if ticket in open_tickets:
+                                continue
+                            op = float(d.get("open_price") or 0.0)
+                            cp = float(d.get("close_price") or op)
+                            direction = str(d.get("direction", "BUY")).upper()
+                            pips = round((cp - op) * 10000.0, 1) if "BUY" in direction else round((op - cp) * 10000.0, 1)
+                            trades.append({
+                                "magic": d.get("magic_number", 0),
+                                "ticket": ticket,
+                                "account_number": d.get("account_number", active_account),
+                                "symbol": d.get("symbol", "USDCADm"),
+                                "direction": direction,
+                                "lots": float(d.get("lots", 0.0)),
+                                "entry_price": op,
+                                "current_price": cp,
+                                "close_price": cp,
+                                "sl_price": float(d.get("stop_loss") or 0.0),
+                                "tp_price": float(d.get("take_profit") or 0.0),
+                                "pnl": float(d.get("realized_pnl") or 0.0),
+                                "pips": pips,
+                                "status": "CLOSED",
+                                "exit_reason": d.get("exit_reason", "TP"),
+                                "created_at": d.get("open_time", ""),
+                                "closed_at": d.get("close_time", ""),
+                            })
+                    else:
+                        # Fallback to orders table
+                        if account_filter is not None:
+                            cursor.execute(
+                                "SELECT * FROM orders WHERE account_number = ? ORDER BY created_at DESC LIMIT ?",
+                                (int(account_filter), limit_val),
+                            )
+                        else:
+                            cursor.execute(
+                                "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?",
+                                (limit_val,),
+                            )
+                        for r in cursor.fetchall():
+                            d = dict(r)
+                            ticket = d.get("ticket") or 0
+                            if ticket in open_tickets:
+                                continue
+                            op = float(d.get("fill_price") or d.get("target_entry") or 0.0)
+                            cp = float(d.get("closed_price") or op)
+                            trades.append({
+                                "magic": d.get("magic_number", 0),
+                                "ticket": ticket,
+                                "account_number": d.get("account_number", active_account),
+                                "symbol": d.get("symbol", "USDCADm"),
+                                "direction": d.get("direction", "BUY"),
+                                "lots": float(d.get("lots", 0.0)),
+                                "entry_price": op,
+                                "current_price": cp,
+                                "close_price": cp,
+                                "sl_price": float(d.get("stop_loss") or 0.0),
+                                "tp_price": float(d.get("take_profit") or 0.0),
+                                "pnl": float(d.get("pnl") or 0.0),
+                                "pips": 0.0,
+                                "status": "CLOSED",
+                                "exit_reason": "CLOSED",
+                                "created_at": d.get("created_at", ""),
+                                "closed_at": d.get("closed_at", ""),
+                            })
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"DB query error: {e}")
 
         return trades
 
@@ -1146,12 +1227,12 @@ class APIHandler(BaseHTTPRequestHandler):
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM signals ORDER BY created_at DESC LIMIT 50")
+            cursor.execute("SELECT * FROM trade_signals ORDER BY timestamp DESC LIMIT 50")
             rows = [dict(r) for r in cursor.fetchall()]
             conn.close()
             return rows
         except Exception as e:
-            logger.error(f"DB query error: {e}")
+            logger.debug(f"DB query error in _get_signals: {e}")
             return []
 
     def _get_candles(self) -> List[Dict[str, Any]]:
@@ -1296,8 +1377,8 @@ class APIHandler(BaseHTTPRequestHandler):
         detected_files = auto_detect_mt4_files_dir()
         detected_exe = auto_detect_mt4_exe()
         settings = self._get_settings()
-        curr_acc = settings.get("ACCOUNT_NUMBER", "70702138")
-        curr_srv = settings.get("ACCOUNT_SERVER", "Exness-Real21")
+        curr_acc = settings.get("ACCOUNT_NUMBER", "69800896")
+        curr_srv = settings.get("ACCOUNT_SERVER", "Exness-Trial8")
         return {
             "status": "ok",
             "detected_files_dir": str(detected_files) if detected_files else "",
@@ -1391,27 +1472,47 @@ class APIHandler(BaseHTTPRequestHandler):
                 try:
                     acc_int = int("".join(filter(str.isdigit, account_num)))
                 except Exception:
-                    acc_int = 70702138
+                    acc_int = int(os.getenv("ACCOUNT_NUMBER", "69800896"))
 
                 acc_dict["account_number"] = acc_int
                 if server:
                     acc_dict["company"] = server
+                if "broker" in data and data["broker"]:
+                    acc_dict["company"] = data["broker"]
                 acc_dict["symbol"] = "USDCADm"
                 acc_dict["currency"] = "USD"
                 acc_dict["pairs"] = {
                     "USDCADm": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
                     "USDCAD": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
                 }
-                if "balance" not in acc_dict:
-                    acc_dict["balance"] = 500.0
-                    acc_dict["equity"] = 500.0
+                if "balance" in data and data["balance"]:
+                    try:
+                        b = float(data["balance"])
+                        acc_dict["balance"] = b
+                        acc_dict["equity"] = b
+                        acc_dict["free_margin"] = b
+                    except Exception:
+                        pass
+                elif "balance" not in acc_dict:
+                    default_balance = float(os.getenv("ACCOUNT_INITIAL_BALANCE", "0.0"))
+                    acc_dict["balance"] = default_balance
+                    acc_dict["equity"] = default_balance
                     acc_dict["margin"] = 0.0
-                    acc_dict["free_margin"] = 500.0
+                    acc_dict["free_margin"] = default_balance
                     acc_dict["margin_level"] = 0.0
-                    acc_dict["profit"] = 0.0
+                if "leverage" in data and data["leverage"]:
+                    try:
+                        acc_dict["leverage"] = int(data["leverage"])
+                    except Exception:
+                        pass
+                elif "leverage" not in acc_dict:
                     acc_dict["leverage"] = 200
-                    acc_dict["digits"] = 5
-                    acc_dict["orders"] = []
+                if "margin" not in acc_dict:
+                    acc_dict["margin"] = 0.0
+                if "profit" not in acc_dict:
+                    acc_dict["profit"] = 0.0
+                acc_dict["digits"] = 5
+                acc_dict["orders"] = []
                 acc_dict["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
                 try:

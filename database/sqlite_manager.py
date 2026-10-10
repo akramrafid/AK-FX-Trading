@@ -138,6 +138,7 @@ class TradingDatabase:
                     ticket INTEGER,
                     fill_price REAL,
                     slippage_pips REAL DEFAULT 0.0,
+                    account_number INTEGER,
                     created_at TEXT NOT NULL,
                     closed_at TEXT
                 );
@@ -169,8 +170,13 @@ class TradingDatabase:
                     realized_pnl REAL,
                     exit_reason TEXT,
                     environment TEXT NOT NULL DEFAULT 'LIVE',
+                    account_number INTEGER,
                     created_at TEXT NOT NULL
                 );
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_journal_account
+                ON trade_journal (account_number, open_time DESC);
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_journal_time 
@@ -439,6 +445,7 @@ class TradingDatabase:
         realized_pnl: float,
         exit_reason: str = "TP",
         environment: str = "LIVE",
+        account_number: Optional[int] = None,
     ) -> int:
         """Records a finalized, closed trade into the journal."""
         now_str = datetime.now(timezone.utc).isoformat()
@@ -446,8 +453,8 @@ class TradingDatabase:
             INSERT INTO trade_journal (
                 ticket, magic_number, symbol, direction, open_time, close_time,
                 open_price, close_price, stop_loss, take_profit, lots, realized_pnl,
-                exit_reason, environment, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                exit_reason, environment, account_number, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ticket) DO UPDATE SET 
                 close_time = excluded.close_time,
                 close_price = excluded.close_price,
@@ -469,6 +476,7 @@ class TradingDatabase:
             realized_pnl,
             exit_reason,
             environment.upper(),
+            account_number,
             now_str,
         )
         with self.get_connection() as conn:
@@ -481,20 +489,30 @@ class TradingDatabase:
             )
             return cur.lastrowid or 0
 
-    def get_orders(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Retrieves recent orders."""
-        query = "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?;"
+    def get_orders(self, limit: int = 50, account_number: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Retrieves recent orders, optionally filtered by account_number."""
+        if account_number is not None:
+            query = "SELECT * FROM orders WHERE account_number = ? ORDER BY created_at DESC LIMIT ?;"
+            params = (account_number, limit)
+        else:
+            query = "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?;"
+            params = (limit,)
         with self.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(query, (limit,))
+            cur.execute(query, params)
             return [dict(r) for r in cur.fetchall()]
 
-    def get_journal_entries(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Retrieves recent closed trade journal entries."""
-        query = "SELECT * FROM trade_journal ORDER BY open_time DESC LIMIT ?;"
+    def get_journal_entries(self, limit: int = 50, account_number: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Retrieves recent closed trade journal entries, optionally filtered by account_number."""
+        if account_number is not None:
+            query = "SELECT * FROM trade_journal WHERE account_number = ? ORDER BY open_time DESC LIMIT ?;"
+            params = (account_number, limit)
+        else:
+            query = "SELECT * FROM trade_journal ORDER BY open_time DESC LIMIT ?;"
+            params = (limit,)
         with self.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(query, (limit,))
+            cur.execute(query, params)
             return [dict(r) for r in cur.fetchall()]
 
     # -------------------------------------------------------------------------

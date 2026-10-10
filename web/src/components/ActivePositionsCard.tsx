@@ -58,7 +58,7 @@ export const ActivePositionsCard: React.FC<PositionsProps> = ({ orders }) => {
                 const isProfitable = pos.profit >= 0;
                 return (
                   <tr key={pos.ticket} className="hover:bg-white/5 transition-colors">
-                    <td className="py-2.5 px-3 font-bold text-white">#{pos.ticket}</td>
+                    <td className="py-2.5 px-3 font-bold text-white">Ticket: {pos.ticket}</td>
                     <td className="py-2.5 px-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${
                         isBuy ? 'bg-accent-green-15 text-accent-green' : 'bg-accent-red-15 text-accent-red'

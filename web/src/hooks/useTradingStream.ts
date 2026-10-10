@@ -5,23 +5,23 @@ import { api } from '../lib/api';
 import { AccountInfo, BridgeStatus, Candle, Position, Settings, TradingSignal } from '../types/trading';
 
 const defaultAccount: AccountInfo = {
-  account_number: '70702138',
-  company: 'Exness',
+  account_number: '69800896',
+  company: 'Exness Technologies Ltd',
   currency: 'USD',
-  balance: 492.85,
-  equity: 492.85,
+  balance: 5000.00,
+  equity: 5000.00,
   margin: 0,
-  free_margin: 492.85,
+  free_margin: 5000.00,
   margin_level: 0,
   profit: 0,
-  leverage: 200,
+  leverage: 2000,
   symbol: 'USDCADm',
-  bid: 1.42175,
-  ask: 1.42189,
+  bid: 1.42546,
+  ask: 1.42560,
   spread_pips: 1.4,
   digits: 5,
   orders: [],
-  trades_today: 1,
+  trades_today: 0,
 };
 
 const defaultStatus: BridgeStatus = {
@@ -30,15 +30,15 @@ const defaultStatus: BridgeStatus = {
   strategy_mode: 'c1_wickswap',
   symbol: 'USDCADm',
   timeframe: 'M5',
-  orders_today: 1,
+  orders_today: 0,
   daily_drawdown_pct: 0.0,
   max_daily_drawdown_pct: 3.0,
   session_filter_active: true,
   watchdog: {
     state: 'HEALTHY',
-    bars_processed: 120,
-    orders_dispatched: 1,
-    message: 'System operational. Last bar <1s ago.',
+    bars_processed: 0,
+    orders_dispatched: 0,
+    message: 'System operational.',
   },
 };
 
@@ -66,13 +66,19 @@ export function useTradingStream() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const refreshData = useCallback(async () => {
+  const activeAccountRef = useRef<string | number>('69800896');
+
+  const refreshData = useCallback(async (accountNum?: string | number) => {
+    if (accountNum !== undefined) {
+      activeAccountRef.current = accountNum;
+    }
+    const currAcc = activeAccountRef.current;
     try {
       const [accData, statusData, settingsData, tradesData, sigData] = await Promise.allSettled([
         api.getAccount(),
         api.getStatus(),
         api.getSettings(),
-        api.getTrades(),
+        api.getTrades(currAcc),
         api.getSignals(),
       ]);
 
@@ -203,9 +209,17 @@ export function useTradingStream() {
       await api.updateSettings(newSettings);
       await refreshData();
     },
-    connectAccount: async (data: { account_number: string; password?: string; server?: string; terminal_path?: string }) => {
+    connectAccount: async (data: {
+      account_number: string;
+      password?: string;
+      server?: string;
+      broker?: string;
+      balance?: number;
+      leverage?: number;
+      terminal_path?: string;
+    }) => {
       const res = await api.connectAccount(data);
-      await refreshData();
+      await refreshData(data.account_number);
       return res;
     },
   };
