@@ -1,7 +1,7 @@
 """
 AK Forex Trading — Local API Server (stdlib only).
 
-Exposes REST endpoints + WebSocket for the Flutter desktop app
+Exposes REST endpoints + WebSocket for the Next.js desktop control room
 to communicate with the Python trading backend.
 
 Endpoints:
@@ -688,20 +688,20 @@ class BridgeController:
             rg = getattr(b, "risk_guardrails", None)
             if rg is not None:
                 if hasattr(rg, "trip_emergency_halt"):
-                    rg.trip_emergency_halt("Emergency halt via Flutter app")
+                    rg.trip_emergency_halt("Emergency halt via GUI desk")
                 elif hasattr(rg, "trigger_emergency_halt"):
-                    rg.trigger_emergency_halt("Emergency halt via Flutter app")
+                    rg.trigger_emergency_halt("Emergency halt via GUI desk")
                 elif hasattr(rg, "activate_emergency_halt"):
-                    rg.activate_emergency_halt("Emergency halt via Flutter app")
+                    rg.activate_emergency_halt("Emergency halt via GUI desk")
         if self._bridge is not None:
             rg = getattr(self._bridge, "risk_guardrails", None)
             if rg is not None:
                 if hasattr(rg, "trip_emergency_halt"):
-                    rg.trip_emergency_halt("Emergency halt via Flutter app")
+                    rg.trip_emergency_halt("Emergency halt via GUI desk")
                 elif hasattr(rg, "trigger_emergency_halt"):
-                    rg.trigger_emergency_halt("Emergency halt via Flutter app")
+                    rg.trigger_emergency_halt("Emergency halt via GUI desk")
                 elif hasattr(rg, "activate_emergency_halt"):
-                    rg.activate_emergency_halt("Emergency halt via Flutter app")
+                    rg.activate_emergency_halt("Emergency halt via GUI desk")
         self.event_bus.broadcast("emergency_halt", {"active": True, "emergency_halt": True})
         return {"status": "halted", "emergency_halt": True}
 
@@ -804,7 +804,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "not_found"}, 404)
 
     def _serve_static(self, path: str) -> bool:
-        web_dir = Path(__file__).resolve().parent.parent / "flutter_app" / "build" / "web"
+        web_dir = Path(__file__).resolve().parent.parent / "web" / "out"
         if not web_dir.exists():
             return False
 
@@ -837,6 +837,7 @@ class APIHandler(BaseHTTPRequestHandler):
             ".ttf": "font/ttf",
             ".woff": "font/woff",
             ".woff2": "font/woff2",
+            ".txt": "text/plain; charset=utf-8",
         }
         content_type = mime_types.get(target.suffix.lower(), "application/octet-stream")
 
@@ -1232,13 +1233,8 @@ class APIHandler(BaseHTTPRequestHandler):
             env_path = Path("d:/AK Forex Trading/.env")
             if not env_path.exists():
                 return {}
-            settings: Dict[str, str] = {}
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    settings[key.strip()] = value.strip()
-            return settings
+            from config import parse_simple_env_file
+            return parse_simple_env_file(env_path)
         except Exception as e:
             logger.error(f"Failed to read settings: {e}")
             return {}
@@ -1537,7 +1533,7 @@ def create_api_server(
 
 
 def start_api_server(host: str = "127.0.0.1", port: int = 8642) -> None:
-    """Start the local API server for the Flutter desktop app."""
+    """Start the local API server for the Next.js desktop control room."""
     event_bus = EventBus()
     controller = BridgeController(event_bus)
 

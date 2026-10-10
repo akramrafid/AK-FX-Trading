@@ -15,7 +15,7 @@ class FrontendContractChecker:
     """Validate design, growth, accessibility, and performance handoff artifacts."""
 
     SOURCE_EXTENSIONS = {".css", ".scss", ".sass", ".less", ".tsx", ".jsx", ".vue", ".svelte", ".html"}
-    SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "coverage", "vendor"}
+    SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "out", "coverage", "vendor"}
     HEX_IN_COMPONENT = re.compile(r"#[0-9a-fA-F]{3,8}\b")
     PLACEHOLDER = re.compile(r"\{\{.*?\}\}")
 

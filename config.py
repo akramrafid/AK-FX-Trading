@@ -67,8 +67,8 @@ class AppConfig:
     max_daily_trades: Optional[int] = None  # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")
     session_filter_enabled: bool = True
-    session_start_hour: int = 7   # 07:00 UTC (London Open)
-    session_end_hour: int = 21    # 21:00 UTC (NY Close)
+    session_start_hour: int = 7   # 07:00 UTC (1:00 PM Local Time UTC+6)
+    session_end_hour: int = 18    # 18:00 UTC (12:00 AM / Midnight Local Time UTC+6)
     emergency_halt: bool = False
 
     # Bridge Tuning
@@ -146,7 +146,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         max_spread_pips=Decimal(get_var("MAX_SPREAD_PIPS", "2.5")),
         session_filter_enabled=get_var("SESSION_FILTER_ENABLED", "true").lower() in ("true", "1", "yes"),
         session_start_hour=int(get_var("SESSION_START_HOUR", "7")),
-        session_end_hour=int(get_var("SESSION_END_HOUR", "21")),
+        session_end_hour=int(get_var("SESSION_END_HOUR", "18")),
         emergency_halt=get_var("EMERGENCY_HALT", "false").lower() in ("true", "1", "yes"),
         confirmation_timeout_sec=float(get_var("CONFIRMATION_TIMEOUT_SEC", "10.0")),
         max_heartbeat_age_sec=float(get_var("MAX_HEARTBEAT_AGE_SEC", "900.0")),

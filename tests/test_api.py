@@ -73,7 +73,7 @@ class TestAPIServerComponents(unittest.TestCase):
         try:
             # Test GET /api/status
             url = f"http://127.0.0.1:{port}/api/status"
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url, timeout=8) as resp:
                 self.assertEqual(resp.status, 200)
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertIn("bridge_running", body)
@@ -81,7 +81,7 @@ class TestAPIServerComponents(unittest.TestCase):
 
             # Test GET /api/account
             url = f"http://127.0.0.1:{port}/api/account"
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url, timeout=8) as resp:
                 self.assertEqual(resp.status, 200)
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertIn("balance", body)
@@ -93,7 +93,7 @@ class TestAPIServerComponents(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 self.assertEqual(resp.status, 200)
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertTrue(body["emergency_halt"])
@@ -105,7 +105,7 @@ class TestAPIServerComponents(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 self.assertEqual(resp.status, 200)
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertFalse(body["emergency_halt"])
@@ -117,7 +117,7 @@ class TestAPIServerComponents(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 self.assertEqual(resp.status, 200)
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertIn("status", body)

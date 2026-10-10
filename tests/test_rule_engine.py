@@ -1082,6 +1082,29 @@ class TestC1WickSwapStrategy(unittest.TestCase):
         self.assertAlmostEqual(sig.reward_risk_ratio, 5.0, places=1)
         self.assertFalse(engine.is_armed)
 
+    def test_c1_wickswap_blocks_trades_at_or_after_12_am_local_cutoff(self):
+        """
+        User rule: 'Listen dont take any trades after 12 AM'.
+        12:00 AM local time (UTC+6) corresponds to 18:00 UTC.
+        Candles arriving at 18:00 UTC and beyond must be blocked by the session filter.
+        """
+        engine = RuleEngine.c1_wickswap_preset(
+            symbol="USDCADm",
+            session_filter=True,
+            session_start_hour=7,
+            session_end_hour=18,
+        )
+        # Setup at 18:00 UTC (12:00 AM local time)
+        t_midnight = datetime(2026, 10, 8, 18, 0, tzinfo=timezone.utc)
+        m15_prev = Candle(timestamp=t_midnight - timedelta(minutes=15), open=1.42200, high=1.42300, low=1.42150, close=1.42280)
+        engine.on_htf_candle(m15_prev, timeframe="M15")
+
+        # Candle at 18:00 UTC sweeps previous high
+        m15_sweep = Candle(timestamp=t_midnight, open=1.42280, high=1.42350, low=1.42250, close=1.42270)
+        engine.on_htf_candle(m15_sweep, timeframe="M15")
+
+        # Must NOT arm because 18:00 UTC is at/after the 12:00 AM local cutoff
+        self.assertFalse(engine.is_armed, "Rule engine must not arm or trade after 12 AM local time (18:00 UTC)")
 
 
 if __name__ == "__main__":

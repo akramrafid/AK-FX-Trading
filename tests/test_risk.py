@@ -280,18 +280,26 @@ class TestRiskGuardrails(unittest.TestCase):
         self.assertEqual(result.reason, TradeRejectionReason.OUTSIDE_SESSION_HOURS)
 
     def test_outside_session_hours_late(self):
-        """22:00 UTC is after NY close (21:00 UTC)."""
+        """22:00 UTC is after session cutoff."""
         late = datetime(2024, 9, 24, 22, 0, tzinfo=timezone.utc)
         state = self._make_default_state(timestamp=late)
         result = self.guardrails.validate_trade(state, Decimal("0.05"), late)
         self.assertFalse(result.is_allowed)
         self.assertEqual(result.reason, TradeRejectionReason.OUTSIDE_SESSION_HOURS)
 
-    def test_ny_session_allowed_up_to_close(self):
-        """20:00 UTC is within NY session (before 21:00 UTC close)."""
-        ny_late = datetime(2024, 9, 24, 20, 0, tzinfo=timezone.utc)
-        state = self._make_default_state(timestamp=ny_late)
-        result = self.guardrails.validate_trade(state, Decimal("0.05"), ny_late)
+    def test_outside_session_hours_at_12_am_local_cutoff(self):
+        """18:00 UTC corresponds to 12:00 AM midnight local time (UTC+6) and must be blocked."""
+        midnight_local = datetime(2024, 9, 24, 18, 0, tzinfo=timezone.utc)
+        state = self._make_default_state(timestamp=midnight_local)
+        result = self.guardrails.validate_trade(state, Decimal("0.05"), midnight_local)
+        self.assertFalse(result.is_allowed)
+        self.assertEqual(result.reason, TradeRejectionReason.OUTSIDE_SESSION_HOURS)
+
+    def test_session_allowed_up_to_12_am_local_close(self):
+        """17:00 UTC (11:00 PM local time) is within session (before 18:00 UTC / 12:00 AM cutoff)."""
+        active_time = datetime(2024, 9, 24, 17, 0, tzinfo=timezone.utc)
+        state = self._make_default_state(timestamp=active_time)
+        result = self.guardrails.validate_trade(state, Decimal("0.05"), active_time)
         self.assertTrue(result.is_allowed)
 
     def test_within_session_hours(self):

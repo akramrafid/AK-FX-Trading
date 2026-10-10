@@ -95,22 +95,22 @@ If abnormal broker spread, flash crash, or high-impact geopolitical event occurs
 
 ---
 
-## 6. Desktop Application (Flutter GUI Control Room)
+## 6. Desktop Application (Next.js GUI Control Room)
 
-The system includes a standalone Flutter Windows Desktop control room (`flutter_app/`) modeled with a dark glassmorphic interface, real-time price action charting, interactive trade signal markers, account telemetry, and one-click execution controls.
+The system includes a high-performance Next.js desktop control room (`web/`) built with TypeScript, Tailwind CSS, and TradingView Lightweight Charts (v5). It features real-time price action charting, interactive trade signal markers, account telemetry, risk guardrails, and one-click execution controls.
 
 ### 6.1 One-Click Launch
 
-To launch both the local Python API bridge (`http://127.0.0.1:8642`) and the Flutter Desktop Application simultaneously:
+To launch both the local Python API bridge (`http://127.0.0.1:8642`) and the Next.js Desktop Application simultaneously:
 
 ```cmd
 scripts\run_app.bat
 ```
 
 This batch launcher:
-1. Verifies the Python 3.10+ virtual environment and Flutter SDK.
-2. Spawns the background HTTP & RFC-6455 WebSocket API server (`python -m api.server`).
-3. Launches the Flutter Windows desktop app (`flutter run -d windows`).
+1. Verifies the MetaTrader 4 terminal connection.
+2. Spawns the background HTTP & RFC-6455 WebSocket API server (`python -m api.server`), serving the static compiled dashboard directly.
+3. Launches the application in an Edge or Chrome frameless desktop window (`http://127.0.0.1:8642`).
 
 ### 6.2 Manual Component Startup (Development Mode)
 
@@ -120,24 +120,26 @@ If developing or running components individually:
    ```cmd
    python -m api.server
    ```
-2. **Launch the Flutter Application**:
+2. **Launch the Next.js Dev Server**:
    ```cmd
-   cd flutter_app
-   flutter run -d windows
+   cd web
+   npm run dev
    ```
 
 ### 6.3 GUI Features & Controls
 
-- **Live Navigation & Status (`HeaderNav`):**
+- **Live Navigation & Status (`Header`):**
   - Displays real-time WebSocket connection state (`LIVE`, `CONNECTING`, `OFFLINE`).
-  - Quick-switch tabs for Dashboard, Trades, Signals, Risk, and Settings.
-  - "Bridge: Running / Stopped" status badge with one-click settings launcher.
-- **Top Pair Selector (`MarketChips`):**
-  - Multi-market switcher between `EURUSDm`, `GBPUSDm`, `USDJPYm`, and `XAUUSDm` with live pip change and spread indicators.
-- **Interactive Price Canvas (`TradingChart`):**
-  - Live M5 candle price action rendered via `fl_chart` with gradient glow.
-  - Timeframe switcher (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`).
-  - Automated visual entry pins: `[B]` (Buy) and `[S]` (Sell) markers anchored to sweep/confirmation levels.
+  - Active MT4 account telemetry badge (`Exness #70702138`).
+  - "Bridge: Running / Stopped" status badge with one-click bridge toggle and halt controls.
+- **Top Pair Selector & Metrics:**
+  - Balance, Equity, P&L, Free Margin, and dynamic ATR lot sizing calculators.
+- **Interactive Price Canvas (`TradingViewChart`):**
+  - Live candle price action rendered via TradingView Lightweight Charts (v5) with SMA 20 and EMA 50 overlays.
+  - Timeframe switcher (`M1`, `M5`, `M15`, `H1`, `D1`).
+  - Crosshair HUD displaying Open, High, Low, Close, and ATR Lot Size.
+- **Risk Guardrails Card (`RiskGuardrailsCard`):**
+  - Daily loss, trade count, max drawdown tracking, and the user-mandated **12:00 AM Local Cutoff Active** rule banner (`07:00-18:00 UTC`).
 - **Account & Strategy Card (`AccountCard`):**
   - Live account balance (`$500.00`), dynamic risk budget (`$7.50 / 1.5%`), and auto-calculated lot size (`0.11 lots`).
   - **"Start Live Trading" / "Stop Trading"**: Dispatches bridge startup/shutdown to the local quant engine.

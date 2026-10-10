@@ -8,7 +8,7 @@
 
 ## Rendering & Crawlability
 
-- Rendering strategy: static HTML shell for Flutter Web, native compile for Windows x64.
+- Rendering strategy: Next.js static export (`web/out`) served natively via local Python stdlib server.
 - Meaningful content without client JavaScript: Static metadata and noscript fallback description.
 - Sitemap URL and generation: Local static `sitemap.xml` for web distribution.
 - Robots policy: Internal trading desk routes marked with appropriate headers.

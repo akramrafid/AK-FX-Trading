@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #070a10;
+    --bg-window-shell: #101318;
+    --bg-window-bar: #141720;
+    --bg-window-card: #131722;
+    --bg-window-card-inset: #181d28;
+    --bg-card: #121721;
+    --bg-card-light: #182030;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-focus: #ceff00;
+
+    /* Traffic Light Window Controls */
+    --traffic-red: #ff5f56;
+    --traffic-yellow: #ffbd2e;
+    --traffic-green: #27c93f;
+
+    /* Signature Accents */
+    --accent-lime: #ceff00;
+    --accent-cyan: #00f0ff;
+    --accent-purple: #6366f1;
+    --accent-purple-light: #818cf8;
+    --accent-green: #00e676;
+    --accent-red: #ff3366;
+    --accent-amber: #ffb300;
+
+    /* Crypto & Forex Token Accents */
+    --token-eth: #627eea;
+    --token-btc: #f7931a;
+    --token-bnb: #f3ba2f;
+    --token-xpr: #1e293b;
+    --token-moon: #312e81;
+
+    /* Chart Palette */
+    --chart-candle-bullish: #6366f1;
+    --chart-candle-bearish: #ef4444;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Atmospheric Desktop Backdrop */
+.bg-desktop-aura {
+  background: radial-gradient(circle at 50% 15%, rgba(99, 102, 241, 0.18) 0%, rgba(14, 165, 233, 0.1) 30%, rgba(7, 10, 16, 0.98) 75%), #070a10;
+}
+
+/* Window Shell & Bars */
+.bg-window-shell { background-color: var(--bg-window-shell); }
+.bg-window-bar { background-color: var(--bg-window-bar); }
+.bg-window-card { background-color: var(--bg-window-card); }
+.bg-window-card-inset { background-color: var(--bg-window-card-inset); }
+
+/* Traffic Light Dots */
+.bg-traffic-red { background-color: var(--traffic-red); }
+.bg-traffic-yellow { background-color: var(--traffic-yellow); }
+.bg-traffic-green { background-color: var(--traffic-green); }
+
+/* Semantic Accents */
+.text-accent-lime { color: var(--accent-lime); }
+.bg-accent-lime { background-color: var(--accent-lime); }
+.border-accent-lime { border-color: var(--accent-lime); }
+.bg-accent-lime-10 { background-color: rgba(206, 255, 0, 0.1); }
+.bg-accent-lime-15 { background-color: rgba(206, 255, 0, 0.15); }
+.border-accent-lime-40 { border-color: rgba(206, 255, 0, 0.4); }
+
+.text-accent-cyan { color: var(--accent-cyan); }
+.bg-accent-cyan { background-color: var(--accent-cyan); }
+.border-accent-cyan { border-color: var(--accent-cyan); }
+.bg-accent-cyan-15 { background-color: rgba(0, 240, 255, 0.15); }
+.border-accent-cyan-40 { border-color: rgba(0, 240, 255, 0.4); }
+
+.text-accent-purple { color: var(--accent-purple); }
+.bg-accent-purple { background-color: var(--accent-purple); }
+.border-accent-purple { border-color: var(--accent-purple); }
+.bg-accent-purple-15 { background-color: rgba(99, 102, 241, 0.15); }
+.border-accent-purple-40 { border-color: rgba(99, 102, 241, 0.4); }
+
+.text-accent-green { color: var(--accent-green); }
+.bg-accent-green { background-color: var(--accent-green); }
+.border-accent-green { border-color: var(--accent-green); }
+.bg-accent-green-15 { background-color: rgba(0, 230, 118, 0.15); }
+.border-accent-green-40 { border-color: rgba(0, 230, 118, 0.4); }
+
+.text-accent-red { color: var(--accent-red); }
+.bg-accent-red { background-color: var(--accent-red); }
+.border-accent-red { border-color: var(--accent-red); }
+.bg-accent-red-15 { background-color: rgba(255, 51, 102, 0.15); }
+.border-accent-red-40 { border-color: rgba(255, 51, 102, 0.4); }
+
+.text-accent-amber { color: var(--accent-amber); }
+.bg-accent-amber-15 { background-color: rgba(255, 179, 0, 0.15); }
+.border-accent-amber-40 { border-color: rgba(255, 179, 0, 0.4); }
+
+/* Token Badges */
+.bg-token-eth { background-color: var(--token-eth); }
+.bg-token-btc { background-color: var(--token-btc); }
+.bg-token-bnb { background-color: var(--token-bnb); }
+.bg-token-xpr { background-color: var(--token-xpr); }
+.bg-token-moon { background-color: var(--token-moon); }
+
+.bg-dark-bg { background-color: var(--bg-main); }
+.bg-dark-card { background-color: var(--bg-card); }
+.bg-dark-surface { background-color: var(--bg-card-light); }
+
+/* Glassmorphism & Depth Utilities */
+.glass-panel {
+  background: rgba(19, 23, 34, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.5);
+}
+
+.glass-panel-glow {
+  background: rgba(19, 23, 34, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(206, 255, 0, 0.28);
+  box-shadow: 0 0 30px -5px rgba(206, 255, 0, 0.12);
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(10, 13, 20, 0.8);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(206, 255, 0, 0.5);
+}
+
+/* Pulsing indicators */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

@@ -8,8 +8,6 @@ echo ======================================================================
 echo.
 
 set "ROOT_DIR=%~dp0.."
-set "RELEASE_DIR=%ROOT_DIR%\flutter_app\build\windows\x64\runner\Release"
-set "APP_EXE=%RELEASE_DIR%\ak_forex_app.exe"
 
 echo [1/3] Checking MetaTrader 4 terminal connection ...
 tasklist /fi "imagename eq terminal.exe" 2>nul | findstr /i "terminal.exe" >nul
@@ -42,11 +40,15 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-if "%1"=="--native" (
-    if exist "%APP_EXE%" goto :launch_windows_exe
+if "%1"=="--dev" (
+    echo [3/3] Launching Next.js Development Server (http://localhost:3000) ...
+    start "AK Forex Next.js Dev" cmd /k "cd /d %ROOT_DIR%\web && npm run dev"
+    timeout /t 3 /nobreak > nul
+    start http://localhost:3000
+    goto :done
 )
 
-echo [3/3] Launching AK Forex Quant Trading Desk in Web Window ...
+echo [3/3] Launching AK Forex Next.js Trading Desk in Desktop Window ...
 
 :: Check for Edge or Chrome application window mode (frameless native desktop look)
 where msedge >nul 2>&1
@@ -63,11 +65,6 @@ if %ERRORLEVEL% EQU 0 (
 
 :: Fallback to default browser
 start http://127.0.0.1:8642
-goto :done
-
-:launch_windows_exe
-echo [3/3] Launching Windows Native Desktop Application ...
-start "" /d "%RELEASE_DIR%" "%APP_EXE%"
 goto :done
 
 :done
