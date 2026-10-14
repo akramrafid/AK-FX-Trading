@@ -1,4 +1,4 @@
-import { AccountInfo, BridgeStatus, Candle, Position, Settings, TradingSignal } from '../types/trading';
+import { AccountInfo, BridgeStatus, Candle, Position, Settings, TradingSignal, UserAccount } from '../types/trading';
 
 const BASE_URL = typeof window !== 'undefined'
   ? (window.location.port === '8642' ? window.location.origin : 'http://127.0.0.1:8642')
@@ -122,5 +122,29 @@ export const api = {
 
   async launchMT4(): Promise<{ status: string }> {
     return fetchJson('/api/mt4/launch', { method: 'POST' });
+  },
+
+  async getAccounts(): Promise<UserAccount[]> {
+    return fetchJson<UserAccount[]>('/api/accounts');
+  },
+
+  async saveAccount(account: Partial<UserAccount>): Promise<{ status: string; account: UserAccount; accounts: UserAccount[] }> {
+    return fetchJson('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify(account),
+    });
+  },
+
+  async switchAccount(accountIdOrNumber: string): Promise<{ status: string; account: UserAccount; accounts: UserAccount[] }> {
+    return fetchJson('/api/accounts/switch', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountIdOrNumber, account_number: accountIdOrNumber }),
+    });
+  },
+
+  async deleteAccount(accountId: string): Promise<{ status: string; deleted_id: string; accounts: UserAccount[] }> {
+    return fetchJson(`/api/accounts?id=${encodeURIComponent(accountId)}`, {
+      method: 'DELETE',
+    });
   },
 };

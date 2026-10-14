@@ -17,8 +17,29 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .models import ArmedState, Candle, Direction, SweepEvent, SweepType, TradeSignal
-from .sweep_detector import detect_sweep, detect_variant_a, detect_variant_b, detect_key_liquidity_sweep
-from .confirmation import evaluate_confirmation, evaluate_3_candles
+from .sweep_detector import (
+    detect_sweep,
+    detect_variant_a,
+    detect_variant_b,
+    detect_key_liquidity_sweep,
+    evaluate_s1_htf_sweep,
+    evaluate_b1_htf_sweep,
+)
+from .confirmation import (
+    evaluate_confirmation,
+    evaluate_3_candles,
+    evaluate_s2_m1_validity,
+    evaluate_b2_m1_validity,
+    evaluate_s3_m1_confirmation,
+    evaluate_b3_m1_confirmation,
+    calculate_s4_entry,
+    calculate_b4_entry,
+    calculate_s5_stop_loss,
+    calculate_b5_stop_loss,
+    calculate_s6_take_profit,
+    calculate_b6_take_profit,
+    format_rule_log_record,
+)
 
 TIMEFRAME_DELTAS = {
     "M1": timedelta(minutes=1),
@@ -116,8 +137,12 @@ class RuleEngine:
         partial_bank_pct: Optional[float] = None,
         breakeven_trigger_r: Optional[float] = None,
         enable_intrabar_sweep: bool = False,
+        strategy_mode: str = "c1_wickswap",
     ) -> None:
         self.symbol = symbol
+        self.strategy_mode = strategy_mode.lower()
+        self.evaluation_logs: List[Dict[str, Any]] = []
+        self.last_evaluation_log: Optional[Dict[str, Any]] = None
         self.allow_variant_a = allow_variant_a
         self.allow_variant_b = allow_variant_b
         self.swing_lookback = swing_lookback
@@ -299,6 +324,48 @@ class RuleEngine:
             **kwargs,
         )
 
+    @classmethod
+    def strict_compliance_preset(
+        cls,
+        symbol: str = "USDCADm",
+        check_m5: bool = True,
+        check_m15: bool = True,
+        **kwargs,
+    ) -> RuleEngine:
+        """
+        Factory constructor for Strict Compliance strategy (100% specification adherence):
+        - Section 0: No extra filters, no indicators, no sessions, no trend checks, no spread/buffer checks.
+        - Section 1: Bullish close > open, Bearish close < open. HTF = M5, M15 evaluated independently.
+        - Section 2 & 3: Rules S1-S6 and B1-B6 tagged and evaluated with structured logging.
+        - Section 8: RR_MULTIPLE = 10, CONFIRM_CANDLES = 3, HTF = [M5, M15], ENTRY_ORDER_TYPE = 'market', SL_REFERENCE = 'c1_extreme'.
+        - Section 9: Assumptions [A1 - A5] implemented.
+        """
+        return cls(
+            symbol=symbol,
+            strategy_mode="strict_compliance",
+            allow_variant_a=True,
+            allow_variant_b=False,
+            anchor_to_key_liquidity=False,
+            use_sweep_wick_sl=False,
+            use_c1_only_sl=True,
+            min_sweep_pips=0.0,
+            min_risk_pips=0.0,
+            min_displacement_ratio=0.0,
+            h1_trend_filter=False,
+            session_filter=False,
+            disarm_on_break=False,
+            reward_risk_ratio=10.0,
+            partial_bank_r=None,
+            partial_bank_pct=0.0,
+            breakeven_trigger_r=None,
+            buffer_pips=0.0,
+            spread_pips=0.0,
+            check_m5=check_m5,
+            check_m15=check_m15,
+            enable_intrabar_sweep=True,
+            **kwargs,
+        )
+
     def _update_daily_and_session_levels(self, candle: Candle) -> None:
         """Update daily running high/low, PDH/PDL, and Asian Session high/low."""
         dt = candle.timestamp
@@ -368,6 +435,8 @@ class RuleEngine:
     def reset(self) -> None:
         """Reset all active state and candle histories."""
         self.disarm()
+        self.evaluation_logs.clear()
+        self.last_evaluation_log = None
         self._htf_history = {"M5": [], "M15": []}
         self._traded_m15_keys = set()
         self._traded_m5_keys = set()
@@ -718,9 +787,491 @@ class RuleEngine:
                                         sweep_type=SweepType.VARIANT_A.value,
                                         is_intrabar=True,
                                     )
-                                    return True
+    def evaluate_strict_rules(
+        self,
+        p_htf: Candle,
+        h_htf: Candle,
+        m1_candles: Sequence[Candle],
+        timeframe: str = "M15",
+        direction: Direction = Direction.SELL,
+        current_price: Optional[float] = None,
+        h_is_closed: bool = False,
+    ) -> Tuple[Optional[TradeSignal], Dict[str, Any]]:
+        """
+        [Section 2 & 3] Strict compliance evaluation for SELL (S1-S6) and BUY (B1-B6).
+        Every evaluation writes a structured log record listing each rule ID with pass/fail and compared values.
+        If a setup is skipped/rejected, the log record shows which rule failed.
+        """
+        curr_price = current_price if current_price is not None else (m1_candles[-1].close if m1_candles else h_htf.close)
 
-        return False
+        if direction == Direction.SELL:
+            # S1 — HTF sweep
+            s1_pass, s1_data = evaluate_s1_htf_sweep(
+                p=p_htf,
+                h_open=h_htf.open,
+                h_high=h_htf.high,
+                h_low=h_htf.low,
+                current_price=curr_price,
+                h_is_closed=h_is_closed,
+            )
+            if not s1_pass:
+                log_rec = format_rule_log_record(
+                    direction="SELL",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=[s1_data],
+                    setup_passed=False,
+                    failing_rule="S1",
+                )
+                self.evaluation_logs.append(log_rec)
+                self.last_evaluation_log = log_rec
+                return None, log_rec
+
+            # S2 & S3 — Scan M1 candles in H's window
+            last_bullish_l: Optional[Candle] = None
+            cand_run: List[Candle] = []
+            cand_l: Optional[Candle] = None
+            last_s2_data: Optional[Dict[str, Any]] = None
+            confirmed_run: Optional[Tuple[Candle, Candle, Candle, Candle, Dict[str, Any]]] = None
+
+            for m in m1_candles:
+                if m.close > m.open:
+                    # Bullish candle
+                    last_bullish_l = m
+                    if cand_run:
+                        # Non-qualifying candle interrupts run before c3 closes [A4]
+                        cand_run.clear()
+                        cand_l = None
+                elif m.close < m.open:
+                    # Bearish candle
+                    if not cand_run:
+                        # Candidate c1
+                        prior_l = last_bullish_l
+                        if prior_l is None and self._m1_history:
+                            for prev in reversed(self._m1_history):
+                                if prev.timestamp < m.timestamp and prev.close > prev.open:
+                                    prior_l = prev
+                                    break
+                        if prior_l is not None:
+                            s2_pass, s2_info = evaluate_s2_m1_validity(c1=m, l_candle=prior_l)
+                            last_s2_data = s2_info
+                            if s2_pass:
+                                cand_run = [m]
+                                cand_l = prior_l
+                            else:
+                                cand_run.clear()
+                                cand_l = None
+                        else:
+                            last_s2_data = {
+                                "rule_id": "S2",
+                                "pass": False,
+                                "values": {
+                                    "c1_timestamp": str(m.timestamp),
+                                    "reason": "no_prior_bullish_l",
+                                },
+                            }
+                            cand_run.clear()
+                            cand_l = None
+                    else:
+                        # c2 or c3
+                        cand_run.append(m)
+                        if len(cand_run) == 3:
+                            confirmed_run = (cand_l, cand_run[0], cand_run[1], cand_run[2], last_s2_data)
+                            break
+                else:
+                    # close == open: strictly neither; interrupts run [A4]
+                    if cand_run:
+                        cand_run.clear()
+                        cand_l = None
+
+            if confirmed_run is not None:
+                l_cand, c1, c2, c3, s2_data = confirmed_run
+                s3_pass, s3_data = evaluate_s3_m1_confirmation([c1, c2, c3])
+                entry_price, s4_data = calculate_s4_entry(c3)
+                sl_price, s5_data = calculate_s5_stop_loss(c1, entry=entry_price)
+                if not s5_data["pass"]:
+                    rules = [s1_data, s2_data, s3_data, s4_data, s5_data]
+                    log_rec = format_rule_log_record(
+                        direction="SELL",
+                        timeframe=timeframe,
+                        htf_timestamp=h_htf.timestamp,
+                        rules=rules,
+                        setup_passed=False,
+                        failing_rule="S5",
+                    )
+                    self.evaluation_logs.append(log_rec)
+                    self.last_evaluation_log = log_rec
+                    return None, log_rec
+
+                tp_price, s6_data = calculate_s6_take_profit(entry_price, sl_price, rr_multiple=self.reward_risk_ratio)
+
+                rules = [s1_data, s2_data, s3_data, s4_data, s5_data, s6_data]
+                log_rec = format_rule_log_record(
+                    direction="SELL",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=True,
+                    failing_rule=None,
+                    details={
+                        "entry": entry_price,
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "c1_timestamp": str(c1.timestamp),
+                        "c3_timestamp": str(c3.timestamp),
+                    },
+                )
+                self.evaluation_logs.append(log_rec)
+                self.last_evaluation_log = log_rec
+
+                signal = TradeSignal(
+                    direction="SELL",
+                    entry_price=entry_price,
+                    stop_loss=sl_price,
+                    take_profit=tp_price,
+                    risk_distance=abs(sl_price - entry_price),
+                    reward_distance=abs(entry_price - tp_price),
+                    reward_risk_ratio=self.reward_risk_ratio,
+                    sweep_type=f"STRICT_HTF_{timeframe}",
+                    timestamp=c3.timestamp,
+                    sweep_timeframe=timeframe,
+                    timeframe="M1",
+                    extreme_price=h_htf.high,
+                )
+                return signal, log_rec
+
+            # Setup was not confirmed. Determine failing rule.
+            if last_s2_data is not None and not last_s2_data.get("pass", False):
+                rules = [s1_data, last_s2_data]
+                log_rec = format_rule_log_record(
+                    direction="SELL",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=False,
+                    failing_rule="S2",
+                )
+            else:
+                s3_pass, s3_data = evaluate_s3_m1_confirmation(cand_run)
+                rules = [s1_data]
+                if last_s2_data is not None:
+                    rules.append(last_s2_data)
+                rules.append(s3_data)
+                log_rec = format_rule_log_record(
+                    direction="SELL",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=False,
+                    failing_rule="S3",
+                )
+
+            self.evaluation_logs.append(log_rec)
+            self.last_evaluation_log = log_rec
+            return None, log_rec
+
+        else:
+            # BUY setup (B1 - B6)
+            b1_pass, b1_data = evaluate_b1_htf_sweep(
+                p=p_htf,
+                h_open=h_htf.open,
+                h_high=h_htf.high,
+                h_low=h_htf.low,
+                current_price=curr_price,
+                h_is_closed=h_is_closed,
+            )
+            if not b1_pass:
+                log_rec = format_rule_log_record(
+                    direction="BUY",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=[b1_data],
+                    setup_passed=False,
+                    failing_rule="B1",
+                )
+                self.evaluation_logs.append(log_rec)
+                self.last_evaluation_log = log_rec
+                return None, log_rec
+
+            # B2 & B3 — Scan M1 candles in H's window
+            last_bearish_l: Optional[Candle] = None
+            cand_run: List[Candle] = []
+            cand_l: Optional[Candle] = None
+            last_b2_data: Optional[Dict[str, Any]] = None
+            confirmed_run: Optional[Tuple[Candle, Candle, Candle, Candle, Dict[str, Any]]] = None
+
+            for m in m1_candles:
+                if m.close < m.open:
+                    # Bearish candle
+                    last_bearish_l = m
+                    if cand_run:
+                        # Non-qualifying candle interrupts run before c3 closes [A4]
+                        cand_run.clear()
+                        cand_l = None
+                elif m.close > m.open:
+                    # Bullish candle
+                    if not cand_run:
+                        # Candidate c1
+                        prior_l = last_bearish_l
+                        if prior_l is None and self._m1_history:
+                            for prev in reversed(self._m1_history):
+                                if prev.timestamp < m.timestamp and prev.close < prev.open:
+                                    prior_l = prev
+                                    break
+                        if prior_l is not None:
+                            b2_pass, b2_info = evaluate_b2_m1_validity(c1=m, l_candle=prior_l)
+                            last_b2_data = b2_info
+                            if b2_pass:
+                                cand_run = [m]
+                                cand_l = prior_l
+                            else:
+                                cand_run.clear()
+                                cand_l = None
+                        else:
+                            last_b2_data = {
+                                "rule_id": "B2",
+                                "pass": False,
+                                "values": {
+                                    "c1_timestamp": str(m.timestamp),
+                                    "reason": "no_prior_bearish_l",
+                                },
+                            }
+                            cand_run.clear()
+                            cand_l = None
+                    else:
+                        # c2 or c3
+                        cand_run.append(m)
+                        if len(cand_run) == 3:
+                            confirmed_run = (cand_l, cand_run[0], cand_run[1], cand_run[2], last_b2_data)
+                            break
+                else:
+                    # close == open: strictly neither; interrupts run [A4]
+                    if cand_run:
+                        cand_run.clear()
+                        cand_l = None
+
+            if confirmed_run is not None:
+                l_cand, c1, c2, c3, b2_data = confirmed_run
+                b3_pass, b3_data = evaluate_b3_m1_confirmation([c1, c2, c3])
+                entry_price, b4_data = calculate_b4_entry(c3)
+                sl_price, b5_data = calculate_b5_stop_loss(l_cand, entry=entry_price)
+                if not b5_data["pass"]:
+                    rules = [b1_data, b2_data, b3_data, b4_data, b5_data]
+                    log_rec = format_rule_log_record(
+                        direction="BUY",
+                        timeframe=timeframe,
+                        htf_timestamp=h_htf.timestamp,
+                        rules=rules,
+                        setup_passed=False,
+                        failing_rule="B5",
+                    )
+                    self.evaluation_logs.append(log_rec)
+                    self.last_evaluation_log = log_rec
+                    return None, log_rec
+
+                tp_price, b6_data = calculate_b6_take_profit(entry_price, sl_price, rr_multiple=self.reward_risk_ratio)
+
+                rules = [b1_data, b2_data, b3_data, b4_data, b5_data, b6_data]
+                log_rec = format_rule_log_record(
+                    direction="BUY",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=True,
+                    failing_rule=None,
+                    details={
+                        "entry": entry_price,
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "c1_timestamp": str(c1.timestamp),
+                        "c3_timestamp": str(c3.timestamp),
+                    },
+                )
+                self.evaluation_logs.append(log_rec)
+                self.last_evaluation_log = log_rec
+
+                signal = TradeSignal(
+                    direction="BUY",
+                    entry_price=entry_price,
+                    stop_loss=sl_price,
+                    take_profit=tp_price,
+                    risk_distance=abs(entry_price - sl_price),
+                    reward_distance=abs(tp_price - entry_price),
+                    reward_risk_ratio=self.reward_risk_ratio,
+                    sweep_type=f"STRICT_HTF_{timeframe}",
+                    timestamp=c3.timestamp,
+                    sweep_timeframe=timeframe,
+                    timeframe="M1",
+                    extreme_price=h_htf.low,
+                )
+                return signal, log_rec
+
+            # Setup was not confirmed. Determine failing rule.
+            if last_b2_data is not None and not last_b2_data.get("pass", False):
+                rules = [b1_data, last_b2_data]
+                log_rec = format_rule_log_record(
+                    direction="BUY",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=False,
+                    failing_rule="B2",
+                )
+            else:
+                b3_pass, b3_data = evaluate_b3_m1_confirmation(cand_run)
+                rules = [b1_data]
+                if last_b2_data is not None:
+                    rules.append(last_b2_data)
+                rules.append(b3_data)
+                log_rec = format_rule_log_record(
+                    direction="BUY",
+                    timeframe=timeframe,
+                    htf_timestamp=h_htf.timestamp,
+                    rules=rules,
+                    setup_passed=False,
+                    failing_rule="B3",
+                )
+
+            self.evaluation_logs.append(log_rec)
+            self.last_evaluation_log = log_rec
+            return None, log_rec
+
+    def _on_m1_candle_strict(self, candle: Candle) -> Optional[TradeSignal]:
+        """
+        Ingest a closed 1-minute candle in strict compliance mode.
+        Maintains M1 history and aggregates forming M5 and M15 higher-timeframe candles.
+        Evaluates M15 and M5 independently per Section 1.
+        Triggers market execution immediately upon confirmation of c3.
+        """
+        self._m1_history.append(candle)
+        if len(self._m1_history) > 500:
+            del self._m1_history[:-500]
+
+        # Update M15 aggregation
+        m15_minute = (candle.timestamp.minute // 15) * 15
+        m15_key = candle.timestamp.replace(minute=m15_minute, second=0, microsecond=0)
+        if self._curr_m15_key is None:
+            self._curr_m15_key = m15_key
+            self._curr_m15_buf = [candle]
+        elif m15_key == self._curr_m15_key:
+            self._curr_m15_buf.append(candle)
+        else:
+            if self._curr_m15_buf:
+                prev_m15 = Candle(
+                    timestamp=self._curr_m15_key,
+                    open=self._curr_m15_buf[0].open,
+                    high=max(b.high for b in self._curr_m15_buf),
+                    low=min(b.low for b in self._curr_m15_buf),
+                    close=self._curr_m15_buf[-1].close,
+                    volume=sum(b.volume for b in self._curr_m15_buf),
+                )
+                self._htf_history.setdefault("M15", []).append(prev_m15)
+                if len(self._htf_history["M15"]) > 100:
+                    del self._htf_history["M15"][:-100]
+            self._curr_m15_key = m15_key
+            self._curr_m15_buf = [candle]
+
+        # Update M5 aggregation
+        m5_minute = (candle.timestamp.minute // 5) * 5
+        m5_key = candle.timestamp.replace(minute=m5_minute, second=0, microsecond=0)
+        if self._curr_m5_key is None:
+            self._curr_m5_key = m5_key
+            self._curr_m5_buf = [candle]
+        elif m5_key == self._curr_m5_key:
+            self._curr_m5_buf.append(candle)
+        else:
+            if self._curr_m5_buf:
+                prev_m5 = Candle(
+                    timestamp=self._curr_m5_key,
+                    open=self._curr_m5_buf[0].open,
+                    high=max(b.high for b in self._curr_m5_buf),
+                    low=min(b.low for b in self._curr_m5_buf),
+                    close=self._curr_m5_buf[-1].close,
+                    volume=sum(b.volume for b in self._curr_m5_buf),
+                )
+                self._htf_history.setdefault("M5", []).append(prev_m5)
+                if len(self._htf_history["M5"]) > 100:
+                    del self._htf_history["M5"][:-100]
+            self._curr_m5_key = m5_key
+            self._curr_m5_buf = [candle]
+
+        # Evaluate M15 if enabled
+        if self.check_m15 and len(self._htf_history.get("M15", [])) >= 1 and self._curr_m15_buf:
+            if self._curr_m15_key not in self._traded_m15_keys:
+                p_m15 = self._htf_history["M15"][-1]
+                h_m15 = Candle(
+                    timestamp=self._curr_m15_key,
+                    open=self._curr_m15_buf[0].open,
+                    high=max(b.high for b in self._curr_m15_buf),
+                    low=min(b.low for b in self._curr_m15_buf),
+                    close=self._curr_m15_buf[-1].close,
+                    volume=sum(b.volume for b in self._curr_m15_buf),
+                )
+                # Check SELL
+                sig_sell, _ = self.evaluate_strict_rules(
+                    p_htf=p_m15,
+                    h_htf=h_m15,
+                    m1_candles=self._curr_m15_buf,
+                    timeframe="M15",
+                    direction=Direction.SELL,
+                    current_price=candle.close,
+                )
+                if sig_sell is not None:
+                    self._traded_m15_keys.add(self._curr_m15_key)
+                    return sig_sell
+
+                # Check BUY
+                sig_buy, _ = self.evaluate_strict_rules(
+                    p_htf=p_m15,
+                    h_htf=h_m15,
+                    m1_candles=self._curr_m15_buf,
+                    timeframe="M15",
+                    direction=Direction.BUY,
+                    current_price=candle.close,
+                )
+                if sig_buy is not None:
+                    self._traded_m15_keys.add(self._curr_m15_key)
+                    return sig_buy
+
+        # Evaluate M5 if enabled
+        if self.check_m5 and len(self._htf_history.get("M5", [])) >= 1 and self._curr_m5_buf:
+            if self._curr_m5_key not in self._traded_m5_keys:
+                p_m5 = self._htf_history["M5"][-1]
+                h_m5 = Candle(
+                    timestamp=self._curr_m5_key,
+                    open=self._curr_m5_buf[0].open,
+                    high=max(b.high for b in self._curr_m5_buf),
+                    low=min(b.low for b in self._curr_m5_buf),
+                    close=self._curr_m5_buf[-1].close,
+                    volume=sum(b.volume for b in self._curr_m5_buf),
+                )
+                # Check SELL
+                sig_sell, _ = self.evaluate_strict_rules(
+                    p_htf=p_m5,
+                    h_htf=h_m5,
+                    m1_candles=self._curr_m5_buf,
+                    timeframe="M5",
+                    direction=Direction.SELL,
+                    current_price=candle.close,
+                )
+                if sig_sell is not None:
+                    self._traded_m5_keys.add(self._curr_m5_key)
+                    return sig_sell
+
+                # Check BUY
+                sig_buy, _ = self.evaluate_strict_rules(
+                    p_htf=p_m5,
+                    h_htf=h_m5,
+                    m1_candles=self._curr_m5_buf,
+                    timeframe="M5",
+                    direction=Direction.BUY,
+                    current_price=candle.close,
+                )
+                if sig_buy is not None:
+                    self._traded_m5_keys.add(self._curr_m5_key)
+                    return sig_buy
+
+        return None
 
     def on_m1_candle(
         self,
@@ -740,6 +1291,8 @@ class RuleEngine:
             disarms due to expiry.
         """
         candle = raw_candle if isinstance(raw_candle, Candle) else Candle.from_dict(raw_candle)
+        if self.strategy_mode == "strict_compliance":
+            return self._on_m1_candle_strict(candle)
         self._m1_history.append(candle)
         if len(self._m1_history) > 100:
             del self._m1_history[:-100]

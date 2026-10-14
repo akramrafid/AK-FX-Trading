@@ -47,6 +47,21 @@ def parse_simple_env_file(filepath: Path) -> Dict[str, str]:
     return env_vars
 
 
+# Strategy & Compliance Constants (Section 8)
+RR_MULTIPLE: int = 10
+CONFIRM_CANDLES: int = 3
+HTF: list[str] = ["M5", "M15"]
+ENTRY_ORDER_TYPE: str = "market"
+SL_REFERENCE: str = "c1_extreme"
+
+# Strategy Assumptions (Section 9 [A1 - A5])
+A1_SWEEP_ON_FORMING_HTF: bool = True       # [A1] HTF sweep is read on the still-forming candle H
+A2_M1_VALIDITY_STRICT_CLOSE: bool = True   # [A2] c1.close < L.close for SELL, c1.close > L.close for BUY
+A3_RISK_REWARD_RATIO: float = 10.0         # [A3] Risk-to-reward ratio 1:10
+A4_RESET_ON_INTERRUPTION: bool = True      # [A4] Interrupted run resets and searches again
+A5_EXPIRE_ON_HTF_CLOSE: bool = True        # [A5] Setup expires when sweeping HTF candle closes
+
+
 @dataclass
 class AppConfig:
     """Consolidated production configuration."""
@@ -56,8 +71,13 @@ class AppConfig:
     # Market Strategy
     symbol: str = "EURUSD"
     timeframe: str = "M5"
-    strategy_mode: str = "c1_wickswap"  # "c1_wickswap" (test strategy) or "institutional"
+    strategy_mode: str = "strict_compliance"  # "strict_compliance", "c1_wickswap", or "institutional"
     enable_intrabar_sweep: bool = True  # Enable intrabar sweep detection during HTF formation
+    rr_multiple: int = RR_MULTIPLE
+    confirm_candles: int = CONFIRM_CANDLES
+    htf_timeframes: list[str] = field(default_factory=lambda: list(HTF))
+    entry_order_type: str = ENTRY_ORDER_TYPE
+    sl_reference: str = SL_REFERENCE
     initial_balance: Decimal = Decimal("10000.00")
     risk_pct: Decimal = Decimal("0.01")  # 1.0%
 
@@ -136,7 +156,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         mt4_files_dir=mt4_dir,
         symbol=get_var("TRADING_SYMBOL", "USDCADm").strip().replace("/", ""),
         timeframe=get_var("TRADING_TIMEFRAME", "M5").upper(),
-        strategy_mode=get_var("STRATEGY_MODE", "c1_wickswap").strip().lower(),
+        strategy_mode=get_var("STRATEGY_MODE", "strict_compliance").strip().lower(),
         enable_intrabar_sweep=get_var("ENABLE_INTRABAR_SWEEP", "true").lower() in ("true", "1", "yes"),
         initial_balance=Decimal(get_var("ACCOUNT_INITIAL_BALANCE", "10000.00")),
         risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.01")),

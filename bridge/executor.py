@@ -802,12 +802,23 @@ def main() -> None:
             pass
 
     bridges: List[BridgeExecutor] = []
-    is_c1_mode = getattr(cfg, "strategy_mode", "c1_wickswap").lower() == "c1_wickswap"
-    preset_name = "C1 Wick-Swap (1:5 R:R, BE @ 2R, C1 SL)" if is_c1_mode else "Institutional Preset"
+    mode_str = getattr(cfg, "strategy_mode", "strict_compliance").lower()
+    if mode_str == "strict_compliance":
+        preset_name = "Strict Compliance (1:10 R:R, 100% AK Rules [S1-S6/B1-B6])"
+    elif mode_str == "c1_wickswap":
+        preset_name = "C1 Wick-Swap (1:5 R:R, BE @ 2R, C1 SL)"
+    else:
+        preset_name = "Institutional Preset"
 
     for sym in symbols:
-        engine = (
-            RuleEngine.c1_wickswap_preset(
+        if mode_str == "strict_compliance":
+            engine = RuleEngine.strict_compliance_preset(
+                symbol=sym,
+                check_m5=True,
+                check_m15=True,
+            )
+        elif mode_str == "c1_wickswap":
+            engine = RuleEngine.c1_wickswap_preset(
                 symbol=sym,
                 check_m5=True,
                 check_m15=True,
@@ -817,8 +828,8 @@ def main() -> None:
                 spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
                 enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
             )
-            if is_c1_mode
-            else RuleEngine.institutional_preset(
+        else:
+            engine = RuleEngine.institutional_preset(
                 symbol=sym,
                 check_m5=True,
                 check_m15=True,
@@ -827,7 +838,6 @@ def main() -> None:
                 session_end_hour=cfg.session_end_hour,
                 enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
             )
-        )
         b = BridgeExecutor(
             symbol=sym,
             dwx_client=dwx,

@@ -10,7 +10,7 @@ Implements two sweep triggers on closed OHLC candles:
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from .models import Candle, Direction, SweepEvent, SweepType
 
 
@@ -261,4 +261,92 @@ def detect_key_liquidity_sweep(
         )
 
     return None
+
+
+def evaluate_s1_htf_sweep(
+    p: Candle,
+    h_open: float,
+    h_high: float,
+    h_low: float,
+    current_price: float,
+    h_is_closed: bool = False,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule S1] HTF sweep for SELL setups.
+    Evaluated live on the forming HTF candle H, with P = previous closed HTF candle.
+    Conditions:
+    1. P is bullish: p.close > p.open
+    2. H.high > P.high (H's wick swept P's wick)
+    3. H is currently bearish: current_price < H.open
+    H does not need to be closed. [A1] Setup expires when H closes. [A5]
+    """
+    p_bullish = p.close > p.open
+    h_swept = h_high > p.high
+    h_bearish = current_price < h_open
+    h_forming = not h_is_closed
+    passed = bool(p_bullish and h_swept and h_bearish and h_forming)
+
+    eval_data = {
+        "rule_id": "S1",
+        "pass": passed,
+        "values": {
+            "p_bullish": p_bullish,
+            "p_open": p.open,
+            "p_close": p.close,
+            "p_high": p.high,
+            "h_open": h_open,
+            "h_high": h_high,
+            "h_low": h_low,
+            "current_price": current_price,
+            "h_swept_p_high": h_swept,
+            "h_currently_bearish": h_bearish,
+            "h_is_forming": h_forming,
+            "h_is_closed": h_is_closed,
+        },
+    }
+    return passed, eval_data
+
+
+def evaluate_b1_htf_sweep(
+    p: Candle,
+    h_open: float,
+    h_high: float,
+    h_low: float,
+    current_price: float,
+    h_is_closed: bool = False,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule B1] HTF sweep for BUY setups.
+    Evaluated live on the forming HTF candle H, with P = previous closed HTF candle.
+    Conditions:
+    1. P is bearish: p.close < p.open
+    2. H.low < P.low (H's wick swept P's wick)
+    3. H is currently bullish: current_price > H.open
+    H does not need to be closed. Setup expires when H closes. [A5]
+    """
+    p_bearish = p.close < p.open
+    h_swept = h_low < p.low
+    h_bullish = current_price > h_open
+    h_forming = not h_is_closed
+    passed = bool(p_bearish and h_swept and h_bullish and h_forming)
+
+    eval_data = {
+        "rule_id": "B1",
+        "pass": passed,
+        "values": {
+            "p_bearish": p_bearish,
+            "p_open": p.open,
+            "p_close": p.close,
+            "p_low": p.low,
+            "h_open": h_open,
+            "h_high": h_high,
+            "h_low": h_low,
+            "current_price": current_price,
+            "h_swept_p_low": h_swept,
+            "h_currently_bullish": h_bullish,
+            "h_is_forming": h_forming,
+            "h_is_closed": h_is_closed,
+        },
+    }
+    return passed, eval_data
 

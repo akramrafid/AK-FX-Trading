@@ -123,6 +123,64 @@ class TestAPIServerComponents(unittest.TestCase):
                 self.assertIn("status", body)
                 self.assertIn("mt4_running", body)
 
+            # Test GET /api/accounts
+            url = f"http://127.0.0.1:{port}/api/accounts"
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertIsInstance(body, list)
+                self.assertGreaterEqual(len(body), 1)
+
+            # Test POST /api/accounts (dynamically add new account)
+            new_acc_payload = json.dumps({
+                "account_number": "99887766",
+                "broker": "RoboForex Global",
+                "server": "RoboForex-Pro",
+                "name": "RoboForex ECN",
+                "balance": 2500.0,
+                "equity": 2500.0,
+                "leverage": 1000,
+                "is_active": False,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/accounts",
+                data=new_acc_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(body["account"]["account_number"], "99887766")
+
+            # Test POST /api/accounts/switch
+            switch_payload = json.dumps({"account_number": "99887766"}).encode("utf-8")
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/accounts/switch",
+                data=switch_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(body["account"]["account_number"], "99887766")
+                self.assertTrue(body["account"]["is_active"])
+
+            # Test DELETE /api/accounts
+            target_id = body["account"]["id"]
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/accounts?id={target_id}",
+                method="DELETE",
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(body["deleted_id"], target_id)
+
         finally:
             server.shutdown()
             server.server_close()

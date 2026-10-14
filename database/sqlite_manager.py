@@ -18,6 +18,8 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import time
+import uuid
 from typing import Any, Dict, Generator, List, Optional, Sequence
 
 from engine.models import Candle, Direction, TradeSignal
@@ -214,6 +216,28 @@ class TradingDatabase:
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_audit_time 
                 ON audit_logs (created_at DESC);
+            """)
+
+            # 7. Multi-Account Portfolio Management
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id TEXT PRIMARY KEY,
+                    account_number TEXT UNIQUE NOT NULL,
+                    broker TEXT NOT NULL,
+                    server TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    currency TEXT NOT NULL DEFAULT 'USD',
+                    balance REAL NOT NULL DEFAULT 0.0,
+                    equity REAL NOT NULL DEFAULT 0.0,
+                    leverage INTEGER NOT NULL DEFAULT 200,
+                    is_active INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_accounts_active 
+                ON accounts (is_active);
             """)
 
     # -------------------------------------------------------------------------
@@ -600,3 +624,182 @@ class TradingDatabase:
             cur = conn.cursor()
             cur.execute(query, (limit,))
             return [dict(r) for r in cur.fetchall()]
+
+    # -------------------------------------------------------------------------
+    # Multi-Account Portfolio Management
+    # -------------------------------------------------------------------------
+
+    def get_accounts(self) -> List[Dict[str, Any]]:
+        """Retrieves all registered MT4/broker trading accounts.
+        Auto-seeds the primary active account if table is empty.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM accounts ORDER BY created_at ASC;")
+            rows = [dict(r) for r in cur.fetchall()]
+            if not rows:
+                # Seed primary active account
+                now_str = datetime.now(timezone.utc).isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO accounts (
+                        id, account_number, broker, server, name, currency,
+                        balance, equity, leverage, is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        "acc-1",
+                        "69800896",
+                        "Exness Technologies Ltd",
+                        "Exness-Trial8",
+                        "Standard (Exness-Trial8)",
+                        "USD",
+                        5000.00,
+                        5000.00,
+                        2000,
+                        1,
+                        now_str,
+                        now_str,
+                    ),
+                )
+                cur.execute("SELECT * FROM accounts ORDER BY created_at ASC;")
+                rows = [dict(r) for r in cur.fetchall()]
+
+            accounts = []
+            for r in rows:
+                acc = dict(r)
+                acc["is_active"] = bool(acc.get("is_active", 0))
+                accounts.append(acc)
+            return accounts
+
+    def save_account(self, account_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Saves or updates a trading account dynamically.
+        Enforces unique account_number and ensures at most one active account.
+        """
+        now_str = datetime.now(timezone.utc).isoformat()
+        acc_num = str(account_data.get("account_number", "")).strip()
+        if not acc_num:
+            raise ValueError("account_number is required")
+
+        acc_id = str(account_data.get("id") or f"acc-{uuid.uuid4().hex[:8]}")
+        broker = str(account_data.get("broker") or "Exness Technologies Ltd").strip()
+        server = str(account_data.get("server") or "Exness-Trial8").strip()
+        name = str(account_data.get("name") or f"{broker} ({acc_num})").strip()
+        currency = str(account_data.get("currency") or "USD").strip().upper()
+        balance = float(account_data.get("balance") or 0.0)
+        equity = float(account_data.get("equity") or balance)
+        leverage = int(account_data.get("leverage") or 200)
+        is_active = 1 if account_data.get("is_active", False) else 0
+
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            # If setting this account active, deactivate others
+            if is_active:
+                cur.execute("UPDATE accounts SET is_active = 0;")
+
+            cur.execute(
+                """
+                INSERT INTO accounts (
+                    id, account_number, broker, server, name, currency,
+                    balance, equity, leverage, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_number) DO UPDATE SET
+                    broker = excluded.broker,
+                    server = excluded.server,
+                    name = excluded.name,
+                    currency = excluded.currency,
+                    balance = excluded.balance,
+                    equity = excluded.equity,
+                    leverage = excluded.leverage,
+                    is_active = CASE WHEN excluded.is_active = 1 THEN 1 ELSE accounts.is_active END,
+                    updated_at = excluded.updated_at;
+                """,
+                (
+                    acc_id,
+                    acc_num,
+                    broker,
+                    server,
+                    name,
+                    currency,
+                    balance,
+                    equity,
+                    leverage,
+                    is_active,
+                    now_str,
+                    now_str,
+                ),
+            )
+            cur.execute("SELECT * FROM accounts WHERE account_number = ?;", (acc_num,))
+            row = cur.fetchone()
+            if row:
+                res = dict(row)
+                res["is_active"] = bool(res.get("is_active", 0))
+                return res
+            return account_data
+
+    def delete_account(self, account_id: str) -> bool:
+        """Deletes an account by id.
+        If deleted account was active, activates another remaining account.
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, is_active FROM accounts WHERE id = ?;", (account_id,))
+            target = cur.fetchone()
+            if not target:
+                return False
+
+            was_active = bool(target["is_active"])
+            cur.execute("DELETE FROM accounts WHERE id = ?;", (account_id,))
+
+            if was_active:
+                cur.execute("SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1;")
+                remaining = cur.fetchone()
+                if remaining:
+                    cur.execute("UPDATE accounts SET is_active = 1 WHERE id = ?;", (remaining["id"],))
+
+            return True
+
+    def set_active_account(self, account_id_or_number: str) -> Optional[Dict[str, Any]]:
+        """Activates a specific account by id or account_number."""
+        now_str = datetime.now(timezone.utc).isoformat()
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM accounts WHERE id = ? OR account_number = ?;",
+                (account_id_or_number, account_id_or_number),
+            )
+            target = cur.fetchone()
+            if not target:
+                return None
+
+            cur.execute("UPDATE accounts SET is_active = 0;")
+            cur.execute(
+                "UPDATE accounts SET is_active = 1, updated_at = ? WHERE id = ?;",
+                (now_str, target["id"]),
+            )
+            cur.execute("SELECT * FROM accounts WHERE id = ?;", (target["id"],))
+            row = cur.fetchone()
+            if row:
+                res = dict(row)
+                res["is_active"] = bool(res.get("is_active", 0))
+                return res
+            return None
+
+    def get_active_account(self) -> Optional[Dict[str, Any]]:
+        """Returns the currently active account from the database."""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM accounts WHERE is_active = 1 LIMIT 1;")
+            row = cur.fetchone()
+            if row:
+                res = dict(row)
+                res["is_active"] = True
+                return res
+            # Fallback to first available account
+            cur.execute("SELECT * FROM accounts ORDER BY created_at ASC LIMIT 1;")
+            row = cur.fetchone()
+            if row:
+                res = dict(row)
+                res["is_active"] = bool(res.get("is_active", 0))
+                return res
+            return None

@@ -166,3 +166,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_event_time 
     ON audit_logs (event_type, created_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- Multi-Account Portfolio Management
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS accounts (
+    id VARCHAR(64) PRIMARY KEY,
+    account_number VARCHAR(32) UNIQUE NOT NULL,
+    broker VARCHAR(64) NOT NULL,
+    server VARCHAR(64) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    currency VARCHAR(8) NOT NULL DEFAULT 'USD',
+    balance NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+    equity NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+    leverage INTEGER NOT NULL DEFAULT 200,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_accounts_active 
+    ON accounts (is_active);
+

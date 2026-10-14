@@ -756,7 +756,7 @@ class APIHandler(BaseHTTPRequestHandler):
     # ── CORS ─────────────────────────────────────────────────────────────
     def _set_cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def do_OPTIONS(self) -> None:
@@ -773,6 +773,26 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_body(self) -> bytes:
+        """Reads and caches the raw request body according to Content-Length."""
+        if not hasattr(self, "_cached_body"):
+            try:
+                cl = int(self.headers.get("Content-Length", 0))
+                self._cached_body = self.rfile.read(cl) if cl > 0 else b""
+            except Exception:
+                self._cached_body = b""
+        return self._cached_body
+
+    def _read_json(self) -> Dict[str, Any]:
+        """Parses the request body as JSON."""
+        body = self._read_body()
+        if not body:
+            return {}
+        try:
+            return json.loads(body.decode("utf-8"))
+        except Exception:
+            return {}
+
     # ── GET routes ───────────────────────────────────────────────────────
     def do_GET(self) -> None:
         path = self.path.split("?")[0]
@@ -785,6 +805,7 @@ class APIHandler(BaseHTTPRequestHandler):
         routes: Dict[str, Callable[[], Any]] = {
             "/api/status": self._get_status,
             "/api/account": self._get_account,
+            "/api/accounts": self._get_accounts,
             "/api/account/detect": self._get_account_detect,
             "/api/trades": self._get_trades,
             "/api/signals": self._get_signals,
@@ -860,6 +881,7 @@ class APIHandler(BaseHTTPRequestHandler):
     # ── POST routes ──────────────────────────────────────────────────────
     def do_POST(self) -> None:
         path = self.path.split("?")[0]
+        self._read_body()
 
         routes: Dict[str, Callable[[], Any]] = {
             "/api/bridge/start": lambda: self.controller.start(),
@@ -868,12 +890,25 @@ class APIHandler(BaseHTTPRequestHandler):
             "/api/bridge/resume": lambda: self.controller.resume(),
             "/api/mt4/launch": lambda: self.controller.launch_mt4(),
             "/api/account/connect": self._post_account_connect,
+            "/api/accounts": self._post_accounts,
+            "/api/accounts/switch": self._post_accounts_switch,
+            "/api/accounts/delete": self._delete_accounts,
             "/api/settings": self._post_settings,
         }
 
         handler = routes.get(path)
         if handler is not None:
             data = handler()
+            self._send_json(data, 200)
+        else:
+            self._send_json({"error": "not_found"}, 404)
+
+    # ── DELETE routes ────────────────────────────────────────────────────
+    def do_DELETE(self) -> None:
+        path = self.path.split("?")[0]
+        self._read_body()
+        if path == "/api/accounts":
+            data = self._delete_accounts()
             self._send_json(data, 200)
         else:
             self._send_json({"error": "not_found"}, 404)
@@ -1046,10 +1081,58 @@ class APIHandler(BaseHTTPRequestHandler):
     def _get_account(self) -> Dict[str, Any]:
         acc_info = self._read_mt4_account_info()
         if acc_info is not None:
+            # Sync live balance into database active account record
+            db = self._get_db()
+            if db:
+                try:
+                    active = db.get_active_account()
+                    if active and str(active.get("account_number")) == str(acc_info.get("account_number")):
+                        bal = float(acc_info.get("balance", active.get("balance", 0.0)))
+                        eq = float(acc_info.get("equity", bal))
+                        if bal > 0:
+                            db.save_account({
+                                **active,
+                                "balance": bal,
+                                "equity": eq,
+                            })
+                except Exception:
+                    pass
             return acc_info
 
+        # Check SQLite active account before fallback
+        db = self._get_db()
+        if db is not None:
+            try:
+                active = db.get_active_account()
+                if active:
+                    bal = float(active.get("balance", 5000.0))
+                    eq = float(active.get("equity", bal))
+                    return {
+                        "account_number": int("".join(filter(str.isdigit, str(active["account_number"])))) if any(c.isdigit() for c in str(active["account_number"])) else 69800896,
+                        "company": active.get("broker", "Exness Technologies Ltd"),
+                        "account_name": active.get("name", "Standard MT4"),
+                        "currency": active.get("currency", "USD"),
+                        "balance": bal,
+                        "equity": eq,
+                        "margin": 0.0,
+                        "free_margin": bal,
+                        "margin_level": 0.0,
+                        "profit": 0.0,
+                        "leverage": int(active.get("leverage", 2000)),
+                        "symbol": "USDCADm",
+                        "bid": 1.42500,
+                        "ask": 1.42514,
+                        "spread_pips": 1.4,
+                        "digits": 5,
+                        "trades_today": 0,
+                        "open_orders_count": 0,
+                        "orders": [],
+                    }
+            except Exception:
+                pass
+
         # Fallback to defaults
-        balance = float(getattr(self.controller._config, "initial_balance", 500)) if self.controller._config else 500.0
+        balance = float(getattr(self.controller._config, "initial_balance", 5000.0)) if self.controller._config else 5000.0
         return {
             "account_number": int(os.getenv("ACCOUNT_NUMBER", "69800896")),
             "company": os.getenv("ACCOUNT_SERVER", "Exness Technologies Ltd"),
@@ -1061,7 +1144,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "free_margin": balance,
             "margin_level": 0.0,
             "profit": 0.0,
-            "leverage": 200,
+            "leverage": 2000,
             "symbol": "USDCADm",
             "bid": 1.42500,
             "ask": 1.42514,
@@ -1344,9 +1427,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _post_settings(self) -> Dict[str, str]:
         try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8")
-            new_settings = json.loads(body)
+            new_settings = self._read_json()
 
             env_path = Path("d:/AK Forex Trading/.env")
             lines = env_path.read_text(encoding="utf-8").splitlines()
@@ -1391,9 +1472,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def _post_account_connect(self) -> Dict[str, Any]:
         try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else ""
-            data = json.loads(body) if body else {}
+            data = self._read_json()
 
             account_num = str(data.get("account_number") or data.get("account") or "").strip()
             password = str(data.get("password", "")).strip()
@@ -1561,6 +1640,177 @@ class APIHandler(BaseHTTPRequestHandler):
             logger.error(f"Error in _post_account_connect: {e}")
             return {"status": "error", "message": str(e)}
 
+    # ── Multi-Account Portfolio Handlers ─────────────────────────────────
+    def _get_db(self) -> Optional[Any]:
+        """Provides an active TradingDatabase instance."""
+        try:
+            from database.sqlite_manager import TradingDatabase
+            return TradingDatabase(self.db_path)
+        except Exception as e:
+            logger.debug(f"Error initializing TradingDatabase: {e}")
+            return None
+
+    def _get_accounts(self) -> List[Dict[str, Any]]:
+        """Returns all configured accounts from database."""
+        db = self._get_db()
+        if db is None:
+            return []
+        return db.get_accounts()
+
+    def _sync_active_account(self, acc: Dict[str, Any]) -> None:
+        """Synchronizes an active account into .env, DWX_Account.txt, and bridge controller."""
+        acc_num = str(acc.get("account_number", "")).strip()
+        server = str(acc.get("server", "")).strip()
+        broker = str(acc.get("broker", "")).strip()
+        balance = float(acc.get("balance", 0.0))
+        leverage = int(acc.get("leverage", 2000))
+
+        # 1. Update .env file
+        env_updates = {"ACCOUNT_NUMBER": acc_num}
+        if server:
+            env_updates["ACCOUNT_SERVER"] = server
+        env_path = Path("d:/AK Forex Trading/.env")
+        if env_path.exists():
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            updated_lines = []
+            updated_keys = set()
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in env_updates:
+                        updated_lines.append(f"{key}={env_updates[key]}")
+                        updated_keys.add(key)
+                        continue
+                updated_lines.append(line)
+            for k, v in env_updates.items():
+                if k not in updated_keys:
+                    updated_lines.append(f"{k}={v}")
+            env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+        # 2. Update DWX_Account.txt in MT4 files directory
+        mt4_dir = None
+        if self.controller._config and hasattr(self.controller._config, "mt4_files_dir"):
+            mt4_dir = Path(self.controller._config.mt4_files_dir)
+        else:
+            env_settings = self._get_settings()
+            if "MT4_FILES_DIR" in env_settings:
+                mt4_dir = Path(env_settings["MT4_FILES_DIR"])
+
+        if mt4_dir and mt4_dir.exists():
+            acc_file = mt4_dir / "DWX_Account.txt"
+            acc_dict = {}
+            if acc_file.exists():
+                try:
+                    acc_dict = json.loads(acc_file.read_text(encoding="utf-8", errors="ignore"))
+                except Exception:
+                    pass
+            try:
+                acc_int = int("".join(filter(str.isdigit, acc_num)))
+            except Exception:
+                acc_int = 69800896
+
+            acc_dict["account_number"] = acc_int
+            acc_dict["company"] = broker or server or "Exness"
+            acc_dict["symbol"] = "USDCADm"
+            acc_dict["currency"] = acc.get("currency", "USD")
+            if balance > 0:
+                acc_dict["balance"] = balance
+                acc_dict["equity"] = balance
+                acc_dict["free_margin"] = balance
+            acc_dict["leverage"] = leverage
+            try:
+                acc_file.write_text(json.dumps(acc_dict, indent=2), encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"Failed writing DWX_Account.txt: {e}")
+
+    def _post_accounts(self) -> Dict[str, Any]:
+        """Creates or updates a trading account dynamically."""
+        try:
+            data = self._read_json()
+
+            if not data.get("account_number"):
+                return {"status": "error", "message": "account_number is required"}
+
+            db = self._get_db()
+            if not db:
+                return {"status": "error", "message": "Database unavailable"}
+
+            saved = db.save_account(data)
+            if saved.get("is_active"):
+                self._sync_active_account(saved)
+                self.event_bus.broadcast("account_update", self._get_account())
+
+            accounts = db.get_accounts()
+            self.event_bus.broadcast("accounts_update", accounts)
+            return {"status": "ok", "account": saved, "accounts": accounts}
+        except Exception as e:
+            logger.error(f"Error in _post_accounts: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _post_accounts_switch(self) -> Dict[str, Any]:
+        """Switches the active trading account dynamically."""
+        try:
+            data = self._read_json()
+
+            target = data.get("account_id") or data.get("account_number") or data.get("id")
+            if not target:
+                return {"status": "error", "message": "Target account ID or number is required"}
+
+            db = self._get_db()
+            if not db:
+                return {"status": "error", "message": "Database unavailable"}
+
+            activated = db.set_active_account(str(target))
+            if not activated:
+                return {"status": "error", "message": f"Account {target} not found"}
+
+            self._sync_active_account(activated)
+            accounts = db.get_accounts()
+            self.event_bus.broadcast("accounts_update", accounts)
+            self.event_bus.broadcast("account_update", self._get_account())
+            self.event_bus.broadcast("system_notice", {
+                "message": f"Switched to Account #{activated['account_number']} ({activated.get('name', '')})."
+            })
+            return {"status": "ok", "account": activated, "accounts": accounts}
+        except Exception as e:
+            logger.error(f"Error in _post_accounts_switch: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def _delete_accounts(self) -> Dict[str, Any]:
+        """Removes a trading account from the portfolio."""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            target_id = qs.get("id", [None])[0]
+
+            if not target_id:
+                data = self._read_json()
+                target_id = data.get("id") or data.get("account_id")
+
+            if not target_id:
+                return {"status": "error", "message": "Account ID is required for deletion"}
+
+            db = self._get_db()
+            if not db:
+                return {"status": "error", "message": "Database unavailable"}
+
+            success = db.delete_account(str(target_id))
+            if not success:
+                return {"status": "error", "message": "Account not found"}
+
+            accounts = db.get_accounts()
+            self.event_bus.broadcast("accounts_update", accounts)
+            active = db.get_active_account()
+            if active:
+                self._sync_active_account(active)
+                self.event_bus.broadcast("account_update", self._get_account())
+
+            return {"status": "ok", "deleted_id": target_id, "accounts": accounts}
+        except Exception as e:
+            logger.error(f"Error in _delete_accounts: {e}")
+            return {"status": "error", "message": str(e)}
+
     # ── WebSocket upgrade ────────────────────────────────────────────────
     def _handle_ws_upgrade(self) -> None:
         ws_key = self.headers.get("Sec-WebSocket-Key", "").strip()
@@ -1599,9 +1849,6 @@ class APIHandler(BaseHTTPRequestHandler):
         finally:
             self.event_bus.remove_client(ws)
             ws.close()
-
-    def _get_db(self) -> bool:
-        return self.db_path and Path(self.db_path).exists()
 
 
 # ---------------------------------------------------------------------------

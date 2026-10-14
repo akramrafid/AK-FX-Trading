@@ -10,7 +10,7 @@ Evaluates the 3 closed candles following a qualifying liquidity sweep:
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .models import Candle, Direction, SweepEvent, TradeSignal
 
 
@@ -208,4 +208,313 @@ def evaluate_confirmation(
         partial_bank_pct=partial_bank_pct,
         breakeven_trigger_r=breakeven_trigger_r,
     )
+
+
+# =============================================================================
+# Strict AK Forex Strategy Rules (Tagged Implementation: S2-S6, B2-B6)
+# =============================================================================
+
+def evaluate_s2_m1_validity(
+    c1: Candle,
+    l_candle: Candle,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule S2] M1 validity check for SELL setups.
+    c1 = first bearish M1 candle of the bearish run.
+    L = most recent bullish M1 candle before c1.
+    Require: c1.close < L.close.
+    c1's high may exceed L's high; never reject for that. [A2]
+    """
+    c1_bearish = c1.close < c1.open
+    l_bullish = l_candle.close > l_candle.open
+    close_valid = c1.close < l_candle.close
+    passed = bool(c1_bearish and l_bullish and close_valid)
+
+    eval_data = {
+        "rule_id": "S2",
+        "pass": passed,
+        "values": {
+            "c1_open": c1.open,
+            "c1_close": c1.close,
+            "c1_high": c1.high,
+            "c1_bearish": c1_bearish,
+            "l_open": l_candle.open,
+            "l_close": l_candle.close,
+            "l_high": l_candle.high,
+            "l_bullish": l_bullish,
+            "c1_close_lt_l_close": close_valid,
+        },
+    }
+    return passed, eval_data
+
+
+def evaluate_b2_m1_validity(
+    c1: Candle,
+    l_candle: Candle,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule B2] M1 wick check for BUY setups.
+    L = the bearish M1 candle immediately before c1 (the first bullish candle of the run).
+    Require c1.low <= L.low (the bearish candle's wick is smaller than or equal to the bullish candle's wick).
+    Equal passes. Nothing else is checked here.
+    """
+    c1_bullish = c1.close > c1.open
+    l_bearish = l_candle.close < l_candle.open
+    wick_valid = c1.low <= l_candle.low
+    passed = bool(c1_bullish and l_bearish and wick_valid)
+
+    eval_data = {
+        "rule_id": "B2",
+        "pass": passed,
+        "values": {
+            "c1_open": c1.open,
+            "c1_close": c1.close,
+            "c1_low": c1.low,
+            "c1_bullish": c1_bullish,
+            "l_open": l_candle.open,
+            "l_close": l_candle.close,
+            "l_low": l_candle.low,
+            "l_bearish": l_bearish,
+            "c1_low_le_l_low": wick_valid,
+        },
+    }
+    return passed, eval_data
+
+
+def evaluate_s3_m1_confirmation(
+    candles: Sequence[Candle],
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule S3] M1 confirmation for SELL setups.
+    3 consecutive bearish M1 candles, c1, c2, c3 (c1 from S2).
+    Evaluate only on closed M1 candles.
+    """
+    count_ok = len(candles) == 3
+    all_bearish = count_ok and all(c.close < c.open for c in candles)
+    passed = bool(count_ok and all_bearish)
+
+    eval_data = {
+        "rule_id": "S3",
+        "pass": passed,
+        "values": {
+            "count": len(candles),
+            "expected_count": 3,
+            "all_bearish": all_bearish,
+            "candle_states": [
+                {
+                    "timestamp": c.timestamp.isoformat() if hasattr(c.timestamp, "isoformat") else str(c.timestamp),
+                    "open": c.open,
+                    "close": c.close,
+                    "is_bearish": c.close < c.open,
+                }
+                for c in candles
+            ],
+        },
+    }
+    return passed, eval_data
+
+
+def evaluate_b3_m1_confirmation(
+    candles: Sequence[Candle],
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    [Rule B3] M1 confirmation for BUY setups.
+    3 consecutive bullish M1 candles, c1, c2, c3 (c1 from B2).
+    Evaluate only on closed M1 candles.
+    """
+    count_ok = len(candles) == 3
+    all_bullish = count_ok and all(c.close > c.open for c in candles)
+    passed = bool(count_ok and all_bullish)
+
+    eval_data = {
+        "rule_id": "B3",
+        "pass": passed,
+        "values": {
+            "count": len(candles),
+            "expected_count": 3,
+            "all_bullish": all_bullish,
+            "candle_states": [
+                {
+                    "timestamp": c.timestamp.isoformat() if hasattr(c.timestamp, "isoformat") else str(c.timestamp),
+                    "open": c.open,
+                    "close": c.close,
+                    "is_bullish": c.close > c.open,
+                }
+                for c in candles
+            ],
+        },
+    }
+    return passed, eval_data
+
+
+def calculate_s4_entry(c3: Candle) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule S4] Market SELL immediately when c3 closes.
+    No limit orders. Not on a live tick.
+    """
+    entry_price = float(c3.close)
+    eval_data = {
+        "rule_id": "S4",
+        "pass": True,
+        "values": {
+            "entry_price": entry_price,
+            "order_type": "market",
+            "trigger": "c3_close",
+        },
+    }
+    return entry_price, eval_data
+
+
+def calculate_b4_entry(c3: Candle) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule B4] Market BUY immediately when c3 closes.
+    No limit orders. Not on a live tick.
+    """
+    entry_price = float(c3.close)
+    eval_data = {
+        "rule_id": "B4",
+        "pass": True,
+        "values": {
+            "entry_price": entry_price,
+            "order_type": "market",
+            "trigger": "c3_close",
+        },
+    }
+    return entry_price, eval_data
+
+
+def calculate_s5_stop_loss(
+    c1: Candle,
+    entry: Optional[float] = None,
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule S5] Stop-loss for SELL setups.
+    The high of c1 (its wick included). Not the highest of the three. Not anything else.
+    The stop is always above entry.
+    """
+    stop_loss = float(c1.high)
+    passed = True if entry is None else (stop_loss > entry)
+    eval_data = {
+        "rule_id": "S5",
+        "pass": passed,
+        "values": {
+            "stop_loss": stop_loss,
+            "c1_high": float(c1.high),
+            "entry": entry,
+            "sl_above_entry": passed,
+            "reference": "c1_extreme",
+        },
+    }
+    return stop_loss, eval_data
+
+
+def calculate_b5_stop_loss(
+    l_candle: Candle,
+    entry: Optional[float] = None,
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule B5] Stop-loss for BUY setups.
+    The low of L, the bearish candle (wick included), per latest buy example.
+    Not the low of c1. The stop is always below entry.
+    """
+    stop_loss = float(l_candle.low)
+    passed = True if entry is None else (stop_loss < entry)
+    eval_data = {
+        "rule_id": "B5",
+        "pass": passed,
+        "values": {
+            "stop_loss": stop_loss,
+            "l_low": float(l_candle.low),
+            "entry": entry,
+            "sl_below_entry": passed,
+            "reference": "l_extreme",
+        },
+    }
+    return stop_loss, eval_data
+
+
+def calculate_s6_take_profit(
+    entry: float,
+    stop_loss: float,
+    rr_multiple: float = 10.0,
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule S6] Take-profit for SELL setups.
+    entry - 10 * (SL - entry). Risk-reward 1:10. [A3]
+    """
+    risk = stop_loss - entry
+    take_profit = entry - (rr_multiple * risk)
+    eval_data = {
+        "rule_id": "S6",
+        "pass": True,
+        "values": {
+            "entry": entry,
+            "stop_loss": stop_loss,
+            "risk": risk,
+            "take_profit": take_profit,
+            "reward": entry - take_profit,
+            "rr_multiple": rr_multiple,
+        },
+    }
+    return take_profit, eval_data
+
+
+def calculate_b6_take_profit(
+    entry: float,
+    stop_loss: float,
+    rr_multiple: float = 10.0,
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    [Rule B6] Take-profit for BUY setups.
+    entry + 10 * (entry - SL). Risk-reward 1:10.
+    """
+    risk = entry - stop_loss
+    take_profit = entry + (rr_multiple * risk)
+    eval_data = {
+        "rule_id": "B6",
+        "pass": True,
+        "values": {
+            "entry": entry,
+            "stop_loss": stop_loss,
+            "risk": risk,
+            "take_profit": take_profit,
+            "reward": take_profit - entry,
+            "rr_multiple": rr_multiple,
+        },
+    }
+    return take_profit, eval_data
+
+
+def format_rule_log_record(
+    direction: str,
+    rules: Optional[List[Dict[str, Any]]] = None,
+    setup_passed: bool = False,
+    failing_rule: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    htf_timestamp: Optional[Any] = None,
+    details: Optional[Dict[str, Any]] = None,
+    status: Optional[str] = None,
+    evaluations: Optional[List[Dict[str, Any]]] = None,
+    timestamp: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Creates a structured log record listing each rule ID with pass/fail and compared values.
+    If a setup is skipped, failing_rule identifies which rule failed.
+    """
+    effective_rules = rules if rules is not None else (evaluations if evaluations is not None else [])
+    effective_ts = htf_timestamp if htf_timestamp is not None else timestamp
+    ts_str = effective_ts.isoformat() if hasattr(effective_ts, "isoformat") else str(effective_ts) if effective_ts else None
+    effective_status = status if status is not None else ("PASSED" if setup_passed else "SKIPPED")
+
+    return {
+        "timestamp": ts_str,
+        "timeframe": timeframe,
+        "direction": direction,
+        "status": effective_status,
+        "setup_passed": setup_passed or (effective_status == "PASSED"),
+        "failing_rule": failing_rule,
+        "rules": effective_rules,
+        "evaluations": effective_rules,
+        "details": details or {},
+    }
 

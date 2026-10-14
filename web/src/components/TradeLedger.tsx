@@ -124,23 +124,23 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
   }, [filteredHistory, currentPage, pageSize]);
 
   return (
-    <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
+    <div className="flex flex-col gap-3 pt-4 border-t border-white/10">
       {/* 1. Header Toolbar: Mode Toggle + Database Status + Account Selector */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Toggle between Running Trades and Trade History */}
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200">
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md">
           <button
             onClick={() => handleTabSwitch('running')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               currentTabState === 'running'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-900'
+                ? 'bg-white/15 text-white shadow-sm border border-white/15'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             <Activity className="w-3.5 h-3.5 text-accent-green" />
             <span>Running Trades</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-              runningTrades.length > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+              runningTrades.length > 0 ? 'bg-accent-green/20 text-accent-green border border-accent-green/30' : 'bg-white/10 text-slate-400'
             }`}>
               {runningTrades.length}
             </span>
@@ -150,13 +150,13 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
             onClick={() => handleTabSwitch('history')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               currentTabState === 'history'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-900'
+                ? 'bg-white/15 text-white shadow-sm border border-white/15'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
-            <History className="w-3.5 h-3.5 text-accent-purple" />
+            <History className="w-3.5 h-3.5 text-accent-cyan" />
             <span>Trade History</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-slate-200 text-slate-700">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-white/10 text-slate-300">
               {tradeHistory.length}
             </span>
           </button>
@@ -164,14 +164,14 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
 
         {/* Database Connection Pill & Account Info */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-medium">
-            <Database className="w-3 h-3 text-emerald-600" />
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 text-[11px] font-mono font-medium backdrop-blur-md">
+            <Database className="w-3 h-3 text-emerald-400" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>SQLite Connected: {tradeHistory.length} Records</span>
           </div>
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-mono font-bold">
-            <Wallet className="w-3 h-3 text-slate-500" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-slate-300 text-[11px] font-mono font-bold backdrop-blur-md">
+            <Wallet className="w-3 h-3 text-slate-400" />
             <span>Account: {activeAccount}</span>
           </div>
         </div>
@@ -181,50 +181,50 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
       {currentTabState === 'running' && (
         <div className="space-y-3">
           {runningTrades.length > 0 ? (
-            <div className="w-full overflow-x-auto">
+            <div className="w-full overflow-x-auto rounded-xl border border-white/10 bg-black/30 backdrop-blur-md p-1">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="text-slate-400 font-semibold border-b border-slate-100 pb-2">
-                    <th className="pb-2.5 font-medium">Symbol & Ticket</th>
-                    <th className="pb-2.5 font-medium">Order Type & Lots</th>
-                    <th className="pb-2.5 font-medium">Execution Levels</th>
-                    <th className="pb-2.5 font-medium text-right pr-6">Floating P&L</th>
-                    <th className="pb-2.5 w-6"></th>
+                  <tr className="text-slate-400 font-semibold border-b border-white/10 pb-2">
+                    <th className="p-2.5 font-medium">Symbol & Ticket</th>
+                    <th className="p-2.5 font-medium">Order Type & Lots</th>
+                    <th className="p-2.5 font-medium">Execution Levels</th>
+                    <th className="p-2.5 font-medium text-right pr-6">Floating P&L</th>
+                    <th className="p-2.5 w-6"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-white/5">
                   {runningTrades.map((pos) => {
                     const isBuy = pos.type?.toUpperCase().includes('BUY');
                     const isProfitable = pos.profit >= 0;
                     return (
-                      <tr key={pos.ticket} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3">
+                      <tr key={pos.ticket} className="hover:bg-white/5 transition-colors">
+                        <td className="p-2.5">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-sm font-mono">
+                            <div className="w-7 h-7 rounded-lg bg-accent-lime/10 border border-accent-lime/20 text-accent-lime flex items-center justify-center font-bold text-xs shadow-sm font-mono">
                               CA
                             </div>
                             <div>
-                              <div className="font-bold text-slate-800">{pos.symbol}</div>
+                              <div className="font-bold text-white tracking-wide">{pos.symbol}</div>
                               <div className="text-[11px] text-slate-400 font-mono">
                                 Ticket: {pos.ticket} • Acc: {activeAccount}
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td className="py-3">
+                        <td className="p-2.5">
                           <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${
-                              isBuy ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              isBuy ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                             }`}>
                               {isBuy ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                               {pos.type}
                             </span>
-                            <span className="font-mono text-slate-700 font-medium">{pos.lots?.toFixed(2)} Lots</span>
+                            <span className="font-mono text-slate-300 font-medium">{pos.lots?.toFixed(2)} Lots</span>
                           </div>
                         </td>
-                        <td className="py-3">
+                        <td className="p-2.5">
                           <div>
-                            <div className="font-bold text-slate-800 font-mono">
+                            <div className="font-bold text-white font-mono">
                               Open: {pos.open_price?.toFixed(5)}
                             </div>
                             <div className="text-[11px] text-slate-400 font-mono">
@@ -232,14 +232,14 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                             </div>
                           </div>
                         </td>
-                        <td className="py-3 text-right pr-6">
-                          <div className={`inline-flex items-center gap-1 font-mono font-bold ${isProfitable ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        <td className="p-2.5 text-right pr-6">
+                          <div className={`inline-flex items-center gap-1 font-mono font-bold ${isProfitable ? 'text-accent-green' : 'text-rose-400'}`}>
                             <span>{isProfitable ? '+' : ''}${pos.profit.toFixed(2)} USD</span>
                             {isProfitable ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                           </div>
                         </td>
-                        <td className="py-3 text-right">
-                          <button className="text-slate-400 hover:text-slate-700 p-1" title="Order details">
+                        <td className="p-2.5 text-right">
+                          <button className="text-slate-400 hover:text-white p-1 transition-colors cursor-pointer" title="Order details">
                             <MoreVertical className="w-4 h-4" />
                           </button>
                         </td>
@@ -251,17 +251,17 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
             </div>
           ) : (
             /* Real-time Standby State for Running Trades */
-            <div className="py-8 px-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col items-center text-center justify-center space-y-2">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-600 shadow-sm animate-pulse">
+            <div className="py-8 px-4 rounded-2xl bg-black/40 border border-white/10 backdrop-blur-md flex flex-col items-center text-center justify-center space-y-2">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-sm animate-pulse">
                 <Activity className="w-5 h-5" />
               </div>
-              <div className="text-sm font-bold text-slate-800">
+              <div className="text-sm font-bold text-white tracking-wide">
                 No Active Trades Currently Running
               </div>
-              <p className="text-xs text-slate-500 max-w-md">
+              <p className="text-xs text-slate-400 max-w-md">
                 Ak Trading System is actively scanning USDCADm M5/M15 liquidity sweeps. When sweep criteria are validated by the C1 algorithm, orders will dispatch and display here automatically.
               </p>
-              <div className="flex items-center gap-3 pt-2 text-[11px] font-mono text-slate-400">
+              <div className="flex items-center gap-3 pt-2 text-[11px] font-mono text-slate-500">
                 <span>Pair: USDCADm</span>
                 <span>•</span>
                 <span>Bid: {currentBid.toFixed(5)}</span>
@@ -278,23 +278,23 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
         <div className="space-y-4">
           {/* Account Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col">
-              <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md flex flex-col">
+              <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
                 <Layers className="w-3 h-3 text-slate-400" />
                 Total Closed Trades
               </span>
-              <span className="text-lg font-extrabold text-slate-900 font-mono mt-0.5">
+              <span className="text-lg font-extrabold text-white font-mono mt-0.5">
                 {accountMetrics.total}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col">
-              <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
-                <Award className="w-3 h-3 text-amber-500" />
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md flex flex-col">
+              <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                <Award className="w-3 h-3 text-amber-400" />
                 Win Rate
               </span>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-lg font-extrabold text-emerald-600 font-mono">
+                <span className="text-lg font-extrabold text-accent-green font-mono">
                   {accountMetrics.winRate.toFixed(1)}%
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
@@ -303,25 +303,25 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col">
-              <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
-                <TrendingUp className="w-3 h-3 text-emerald-500" />
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md flex flex-col">
+              <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-emerald-400" />
                 Realized P&L
               </span>
               <span className={`text-lg font-extrabold font-mono mt-0.5 ${
-                accountMetrics.netPnl >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                accountMetrics.netPnl >= 0 ? 'text-accent-green' : 'text-rose-400'
               }`}>
                 {accountMetrics.netPnl >= 0 ? '+' : ''}${accountMetrics.netPnl.toFixed(2)} USD
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col">
-              <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
-                <Clock className="w-3 h-3 text-indigo-500" />
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-md flex flex-col">
+              <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                <Clock className="w-3 h-3 text-accent-cyan" />
                 Net Gain Pips
               </span>
               <span className={`text-lg font-extrabold font-mono mt-0.5 ${
-                accountMetrics.totalPips >= 0 ? 'text-indigo-600' : 'text-rose-600'
+                accountMetrics.totalPips >= 0 ? 'text-accent-cyan' : 'text-rose-400'
               }`}>
                 {accountMetrics.totalPips >= 0 ? '+' : ''}{accountMetrics.totalPips.toFixed(1)} pips
               </span>
@@ -329,7 +329,7 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
           </div>
 
           {/* Search & Filter Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/80 p-2 rounded-xl border border-slate-200">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 bg-black/40 p-2 rounded-xl border border-white/10 backdrop-blur-md">
             {/* Search Input */}
             <div className="relative flex-1 min-w-[180px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -341,13 +341,13 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                   setCurrentPage(1);
                 }}
                 placeholder="Search ticket or reason..."
-                className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 font-mono outline-none focus:border-slate-400"
+                className="w-full bg-black/50 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono outline-none focus:border-accent-lime/50 transition-colors"
               />
             </div>
 
             {/* Filter Pills */}
             <div className="flex items-center gap-1.5 text-xs">
-              <div className="flex items-center rounded-lg bg-white border border-slate-200 p-0.5 font-medium">
+              <div className="flex items-center rounded-lg bg-black/50 border border-white/10 p-0.5 font-medium">
                 {(['ALL', 'WINS', 'LOSSES'] as const).map((o) => (
                   <button
                     key={o}
@@ -357,8 +357,8 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                     }}
                     className={`px-2 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
                       outcomeFilter === o
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-500 hover:text-slate-900'
+                        ? 'bg-white/20 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
                     }`}
                   >
                     {o}
@@ -366,7 +366,7 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                 ))}
               </div>
 
-              <div className="flex items-center rounded-lg bg-white border border-slate-200 p-0.5 font-medium">
+              <div className="flex items-center rounded-lg bg-black/50 border border-white/10 p-0.5 font-medium">
                 {(['ALL', 'BUY', 'SELL'] as const).map((d) => (
                   <button
                     key={d}
@@ -376,8 +376,8 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                     }}
                     className={`px-2 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
                       directionFilter === d
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-500 hover:text-slate-900'
+                        ? 'bg-white/20 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
                     }`}
                   >
                     {d}
@@ -388,49 +388,49 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
           </div>
 
           {/* Trade History Table */}
-          <div className="w-full overflow-x-auto">
+          <div className="w-full overflow-x-auto rounded-xl border border-white/10 bg-black/30 backdrop-blur-md p-1">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="text-slate-400 font-semibold border-b border-slate-100 pb-2">
-                  <th className="pb-2.5 font-medium">Ticket & Symbol</th>
-                  <th className="pb-2.5 font-medium">Direction & Lots</th>
-                  <th className="pb-2.5 font-medium">Open & Close Levels</th>
-                  <th className="pb-2.5 font-medium">Reason</th>
-                  <th className="pb-2.5 font-medium text-right pr-4">Realized P&L</th>
-                  <th className="pb-2.5 font-medium text-right pr-2">Date</th>
+                <tr className="text-slate-400 font-semibold border-b border-white/10 pb-2">
+                  <th className="p-2.5 font-medium">Ticket & Symbol</th>
+                  <th className="p-2.5 font-medium">Direction & Lots</th>
+                  <th className="p-2.5 font-medium">Open & Close Levels</th>
+                  <th className="p-2.5 font-medium">Reason</th>
+                  <th className="p-2.5 font-medium text-right pr-4">Realized P&L</th>
+                  <th className="p-2.5 font-medium text-right pr-2">Date</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-white/5">
                 {paginatedHistory.length > 0 ? (
                   paginatedHistory.map((item) => {
                     const isBuy = item.direction?.toUpperCase().includes('BUY');
                     const isWin = item.pnl > 0;
                     return (
-                      <tr key={item.ticket} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-2.5">
+                      <tr key={item.ticket} className="hover:bg-white/5 transition-colors">
+                        <td className="p-2.5">
                           <div>
-                            <div className="font-bold text-slate-800">{item.symbol}</div>
+                            <div className="font-bold text-white tracking-wide">{item.symbol}</div>
                             <div className="text-[11px] text-slate-400 font-mono">
                               Ticket: {item.ticket} • Acc: {item.account_number || activeAccount}
                             </div>
                           </div>
                         </td>
-                        <td className="py-2.5">
+                        <td className="p-2.5">
                           <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${
-                              isBuy ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              isBuy ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                             }`}>
                               {isBuy ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                               {item.direction}
                             </span>
-                            <span className="font-mono text-slate-700 font-medium">
+                            <span className="font-mono text-slate-300 font-medium">
                               {item.lots?.toFixed(2)} Lots
                             </span>
                           </div>
                         </td>
-                        <td className="py-2.5">
+                        <td className="p-2.5">
                           <div>
-                            <div className="font-mono text-slate-800 font-medium">
+                            <div className="font-mono text-slate-200 font-medium">
                               {item.entry_price?.toFixed(5)} &rarr; {item.close_price ? item.close_price.toFixed(5) : '-'}
                             </div>
                             <div className="text-[11px] text-slate-400 font-mono">
@@ -438,20 +438,20 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                             </div>
                           </div>
                         </td>
-                        <td className="py-2.5">
+                        <td className="p-2.5">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
                             item.exit_reason === 'TP'
-                              ? 'bg-emerald-100 text-emerald-800'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                               : item.exit_reason === 'SL'
-                              ? 'bg-rose-100 text-rose-800'
-                              : 'bg-slate-100 text-slate-700'
+                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              : 'bg-white/10 text-slate-300 border border-white/10'
                           }`}>
                             {item.exit_reason || 'CLOSED'}
                           </span>
                         </td>
-                        <td className="py-2.5 text-right pr-4">
+                        <td className="p-2.5 text-right pr-4">
                           <div>
-                            <div className={`font-mono font-bold ${isWin ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            <div className={`font-mono font-bold ${isWin ? 'text-accent-green' : 'text-rose-400'}`}>
                               {isWin ? '+' : ''}${item.pnl.toFixed(2)} USD
                             </div>
                             {item.pips !== undefined && (
@@ -461,7 +461,7 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                             )}
                           </div>
                         </td>
-                        <td className="py-2.5 text-right pr-2 text-slate-400 font-mono text-[11px]">
+                        <td className="p-2.5 text-right pr-2 text-slate-400 font-mono text-[11px]">
                           {item.created_at ? item.created_at.replace('T', ' ').slice(0, 16) : '-'}
                         </td>
                       </tr>
@@ -469,7 +469,7 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                   })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                    <td colSpan={6} className="py-8 text-center text-slate-400 text-xs font-mono">
                       No matching trade records found for Account {activeAccount}.
                     </td>
                   </tr>
@@ -480,7 +480,7 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+            <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs">
               <span className="text-slate-400 font-mono">
                 Showing {((currentPage - 1) * pageSize) + 1} – {Math.min(currentPage * pageSize, filteredHistory.length)} of {filteredHistory.length} trades
               </span>
@@ -489,18 +489,18 @@ export const TradeLedger: React.FC<TradeLedgerProps> = ({
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                  className="p-1.5 rounded-lg border border-white/10 text-slate-300 hover:bg-white/10 disabled:opacity-30 cursor-pointer transition-colors"
                   title="Previous Page"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-2 font-mono text-slate-700 font-bold">
+                <span className="px-2 font-mono text-white font-bold">
                   {currentPage} / {totalPages}
                 </span>
                 <button
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                  className="p-1.5 rounded-lg border border-white/10 text-slate-300 hover:bg-white/10 disabled:opacity-30 cursor-pointer transition-colors"
                   title="Next Page"
                 >
                   <ChevronRight className="w-4 h-4" />

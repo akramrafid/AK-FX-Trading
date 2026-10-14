@@ -11,6 +11,7 @@ import { IntroSplash } from '../components/IntroSplash';
 import { AuthScreen } from '../components/AuthScreen';
 import { useTradingStream } from '../hooks/useTradingStream';
 import { UserAccount } from '../types/trading';
+import { api } from '../lib/api';
 import { Bell } from 'lucide-react';
 
 const defaultSeedAccounts: UserAccount[] = [
@@ -84,6 +85,24 @@ export default function TradingDeskPage() {
     } finally {
       setIsAuthLoaded(true);
     }
+
+    // Dynamically load unlimited accounts from backend SQLite database
+    api.getAccounts()
+      .then((dbAccs) => {
+        if (Array.isArray(dbAccs) && dbAccs.length > 0) {
+          setAccountsList(dbAccs);
+          try {
+            localStorage.setItem('ak_user_accounts', JSON.stringify(dbAccs));
+            const active = dbAccs.find((a) => a.is_active);
+            if (active) {
+              localStorage.setItem('ak_connected_mt4_account', JSON.stringify(active));
+            }
+          } catch {}
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not load accounts from SQLite API (using cached/fallback):', err);
+      });
   }, []);
 
   // Synchronize live account metrics when bridge connects
@@ -141,6 +160,12 @@ export default function TradingDeskPage() {
     }
 
     try {
+      await api.switchAccount(selected.account_number);
+    } catch (e) {
+      console.warn('Failed to switch active account in database:', e);
+    }
+
+    try {
       await connectAccount({
         account_number: selected.account_number,
         server: selected.server,
@@ -162,16 +187,27 @@ export default function TradingDeskPage() {
     setAccountsList(updatedList);
     try {
       localStorage.setItem('ak_user_accounts', JSON.stringify(updatedList));
+      localStorage.setItem('ak_connected_mt4_account', JSON.stringify(newAcc));
     } catch {
       // Storage fallback
     }
     refreshData(newAcc.account_number);
   };
 
-  const handleDeleteAccount = (accId: string) => {
+  const handleDeleteAccount = async (accId: string) => {
+    try {
+      await api.deleteAccount(accId);
+    } catch (e) {
+      console.warn('Failed to delete account on backend:', e);
+    }
     const updatedList = accountsList.filter((a) => a.id !== accId);
     if (updatedList.length > 0 && !updatedList.some((a) => a.is_active)) {
       updatedList[0].is_active = true;
+      try {
+        await api.switchAccount(updatedList[0].account_number);
+      } catch (e) {
+        console.warn('Failed to switch to fallback account in database:', e);
+      }
     }
     setAccountsList(updatedList);
     try {
@@ -225,9 +261,9 @@ export default function TradingDeskPage() {
 
   // 3. Ak Trading System Main Trading Desk
   return (
-    <div className="min-h-screen bg-desktop-aura text-slate-100 flex items-center justify-center p-2 sm:p-4 md:p-8 font-sans selection:bg-accent-lime selection:text-black">
-      {/* Floating macOS Desktop Window Shell */}
-      <div className="w-full max-w-[1580px] bg-window-shell rounded-[28px] border border-white/10 shadow-2xl overflow-hidden flex flex-col backdrop-blur-xl">
+    <div className="min-h-screen bg-desktop-aura text-slate-100 flex flex-col items-center justify-start p-2 sm:p-3 md:p-4 2xl:p-6 font-sans selection:bg-accent-lime selection:text-black">
+      {/* Institutional Quant Trading Desktop Shell */}
+      <div className="w-full max-w-[2560px] mx-auto bg-window-shell rounded-[24px] border border-white/10 shadow-2xl overflow-hidden flex flex-col backdrop-blur-2xl flex-1">
         {/* Top Window Navigation & Traffic Lights Bar */}
         <Header
           status={status}
@@ -268,7 +304,7 @@ export default function TradingDeskPage() {
         />
 
         {/* Main Window Canvas Body */}
-        <div className="p-4 sm:p-5 md:p-6 flex flex-col gap-5">
+        <div className="p-3 sm:p-4 md:p-5 2xl:p-6 flex flex-col gap-4 2xl:gap-5 flex-1">
           {/* System Notice Toast */}
           {systemNotice && (
             <div className="bg-accent-lime-15 border border-accent-lime-40 text-accent-lime px-4 py-2.5 rounded-2xl text-xs font-mono flex items-center gap-2 shadow-lg animate-in slide-in-from-top-2">
@@ -277,10 +313,10 @@ export default function TradingDeskPage() {
             </div>
           )}
 
-          {/* Bi-Tonal Split Grid: Left White Card + Right Dark Cards */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            {/* Left Column: White Canvas Card (Tickers + TV Chart + Trade Ledger) */}
-            <div className="lg:col-span-8 flex flex-col">
+          {/* Institutional Full-Canvas Quant Grid */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 2xl:gap-5 items-start w-full">
+            {/* Left Primary Cockpit: Tickers + Candlestick Chart + Unified Trade Ledger */}
+            <div className="xl:col-span-8 2xl:col-span-9 flex flex-col">
               <TradingViewChart
                 candles={candles}
                 symbol={settings['TRADING_SYMBOL'] || 'USDCADm'}
@@ -298,8 +334,8 @@ export default function TradingDeskPage() {
               />
             </div>
 
-            {/* Right Column: Dark Cards (Account & Swap + Growth & Risk Status) */}
-            <div className="lg:col-span-4 flex flex-col gap-5">
+            {/* Right Telemetry Column: Portfolio Accounts + Swap Control + Risk Guardrails */}
+            <div className="xl:col-span-4 2xl:col-span-3 flex flex-col gap-4 2xl:gap-5">
               {/* Account Portfolio & Automation Card */}
               <AccountSwapCard
                 account={account}

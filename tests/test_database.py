@@ -248,6 +248,65 @@ class TestTradingDatabase(unittest.TestCase):
             logs = disk_db.get_audit_logs(limit=5)
             self.assertEqual(len(logs), 1)
 
+    def test_multi_account_crud_and_switching(self) -> None:
+        """Verify dynamic adding, switching, and deleting of multiple trading accounts."""
+        # 1. Initial auto-seed
+        accounts = self.db.get_accounts()
+        self.assertGreaterEqual(len(accounts), 1)
+        self.assertEqual(accounts[0]["account_number"], "69800896")
+        self.assertTrue(accounts[0]["is_active"])
+
+        # 2. Dynamically add account 2
+        acc2 = self.db.save_account({
+            "account_number": "12345678",
+            "broker": "IC Markets Global",
+            "server": "ICMarketsSC-Live01",
+            "name": "Raw Spread (IC Markets)",
+            "balance": 10000.0,
+            "equity": 10000.0,
+            "leverage": 500,
+            "is_active": False,
+        })
+        self.assertEqual(acc2["account_number"], "12345678")
+        self.assertFalse(acc2["is_active"])
+
+        all_accounts = self.db.get_accounts()
+        self.assertEqual(len(all_accounts), 2)
+
+        # 3. Dynamically add account 3 as active
+        acc3 = self.db.save_account({
+            "account_number": "88776655",
+            "broker": "FTMO Challenge",
+            "server": "FTMO-Server2",
+            "name": "100k Challenge",
+            "balance": 100000.0,
+            "equity": 100000.0,
+            "leverage": 100,
+            "is_active": True,
+        })
+        self.assertTrue(acc3["is_active"])
+        active_now = self.db.get_active_account()
+        self.assertIsNotNone(active_now)
+        self.assertEqual(active_now["account_number"], "88776655")
+
+        # Verify previous accounts were set to inactive
+        accounts_after = self.db.get_accounts()
+        self.assertEqual(len(accounts_after), 3)
+        acc1_record = next(a for a in accounts_after if a["account_number"] == "69800896")
+        self.assertFalse(acc1_record["is_active"])
+
+        # 4. Switch back to account 1
+        switched = self.db.set_active_account("69800896")
+        self.assertIsNotNone(switched)
+        self.assertEqual(switched["account_number"], "69800896")
+        self.assertTrue(switched["is_active"])
+        self.assertEqual(self.db.get_active_account()["account_number"], "69800896")
+
+        # 5. Delete account 2
+        deleted = self.db.delete_account(acc2["id"])
+        self.assertTrue(deleted)
+        self.assertEqual(len(self.db.get_accounts()), 2)
+
 
 class TestBridgeDatabaseIntegration(unittest.TestCase):
     """End-to-end tests verifying BridgeExecutor persists candles, signals, and orders to TradingDatabase."""
