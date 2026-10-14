@@ -253,7 +253,7 @@ class TestTradingDatabase(unittest.TestCase):
         # 1. Initial auto-seed
         accounts = self.db.get_accounts()
         self.assertGreaterEqual(len(accounts), 1)
-        self.assertEqual(accounts[0]["account_number"], "69800896")
+        self.assertEqual(accounts[0]["account_number"], "70704655")
         self.assertTrue(accounts[0]["is_active"])
 
         # 2. Dynamically add account 2
@@ -292,15 +292,15 @@ class TestTradingDatabase(unittest.TestCase):
         # Verify previous accounts were set to inactive
         accounts_after = self.db.get_accounts()
         self.assertEqual(len(accounts_after), 3)
-        acc1_record = next(a for a in accounts_after if a["account_number"] == "69800896")
+        acc1_record = next(a for a in accounts_after if a["account_number"] == "70704655")
         self.assertFalse(acc1_record["is_active"])
 
         # 4. Switch back to account 1
-        switched = self.db.set_active_account("69800896")
+        switched = self.db.set_active_account("70704655")
         self.assertIsNotNone(switched)
-        self.assertEqual(switched["account_number"], "69800896")
+        self.assertEqual(switched["account_number"], "70704655")
         self.assertTrue(switched["is_active"])
-        self.assertEqual(self.db.get_active_account()["account_number"], "69800896")
+        self.assertEqual(self.db.get_active_account()["account_number"], "70704655")
 
         # 5. Delete account 2
         deleted = self.db.delete_account(acc2["id"])

@@ -649,10 +649,10 @@ class TradingDatabase:
                     """,
                     (
                         "acc-1",
-                        "69800896",
+                        "70704655",
                         "Exness Technologies Ltd",
-                        "Exness-Trial8",
-                        "Standard (Exness-Trial8)",
+                        "Exness-Trial9",
+                        "RawSpread (Exness-Trial9)",
                         "USD",
                         5000.00,
                         5000.00,
@@ -683,7 +683,7 @@ class TradingDatabase:
 
         acc_id = str(account_data.get("id") or f"acc-{uuid.uuid4().hex[:8]}")
         broker = str(account_data.get("broker") or "Exness Technologies Ltd").strip()
-        server = str(account_data.get("server") or "Exness-Trial8").strip()
+        server = str(account_data.get("server") or "Exness-Trial9").strip()
         name = str(account_data.get("name") or f"{broker} ({acc_num})").strip()
         currency = str(account_data.get("currency") or "USD").strip().upper()
         balance = float(account_data.get("balance") or 0.0)

@@ -440,11 +440,11 @@ class BridgeController:
         except Exception:
             pass
 
-        strategy_mode = "c1_wickswap"
+        strategy_mode = "strict_compliance"
         try:
             from config import load_config
             cfg = load_config()
-            strategy_mode = getattr(cfg, "strategy_mode", "c1_wickswap")
+            strategy_mode = getattr(cfg, "strategy_mode", "strict_compliance")
         except Exception:
             pass
 
@@ -598,8 +598,14 @@ class BridgeController:
 
                 self._bridges = []
                 for sym in symbols:
-                    strat_mode = getattr(cfg, "strategy_mode", "c1_wickswap").lower()
-                    if strat_mode in ("c1_wickswap", "c1", "wickswap"):
+                    strat_mode = getattr(cfg, "strategy_mode", "strict_compliance").lower()
+                    if strat_mode == "strict_compliance":
+                        engine = RuleEngine.strict_compliance_preset(
+                            symbol=sym,
+                            check_m5=True,
+                            check_m15=True,
+                        )
+                    elif strat_mode in ("c1_wickswap", "c1", "wickswap"):
                         engine = RuleEngine.c1_wickswap_preset(
                             symbol=sym,
                             check_m5=True,
@@ -927,10 +933,13 @@ class APIHandler(BaseHTTPRequestHandler):
         if mt4_dir is None or not mt4_dir.exists():
             return None
 
-        # Extract latest price from MT4 bars file (USDCAD focus)
+        # Extract latest price from MT4 bars file (USDCAD / USDCADm)
         cad_price = 1.42500
-        cad_bars = mt4_dir / "DWX_Bars_USDCADm_M5.txt"
-        if cad_bars.exists():
+        cad_candidates = [mt4_dir / "DWX_Bars_USDCAD_M5.txt", mt4_dir / "DWX_Bars_USDCADm_M5.txt"]
+        cad_existing = [f for f in cad_candidates if f.exists()]
+        if cad_existing:
+            cad_existing.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            cad_bars = cad_existing[0]
             try:
                 cl = cad_bars.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
                 if len(cl) > 1:
@@ -974,22 +983,27 @@ class APIHandler(BaseHTTPRequestHandler):
                                         ord_item["tp_price"] = ord_item["tp"]
                                     if "pnl" not in ord_item and "profit" in ord_item:
                                         ord_item["pnl"] = ord_item["profit"]
-                        data["pairs"] = pairs_dict
-                        data["symbol"] = "USDCADm"
-                        data["bid"] = round(cad_price, 5)
-                        data["ask"] = round(cad_price + 0.00014, 5)
-                        data["spread_pips"] = 1.4
+                        if "pairs" not in data or not data["pairs"]:
+                            data["pairs"] = pairs_dict
+                        if "symbol" not in data or not data["symbol"]:
+                            data["symbol"] = "USDCAD" if (mt4_dir / "DWX_Bars_USDCAD_M5.txt").exists() else "USDCADm"
+                        if "bid" not in data or data["bid"] == 0:
+                            data["bid"] = round(cad_price, 5)
+                        if "ask" not in data or data["ask"] == 0:
+                            data["ask"] = round(cad_price + 0.00014, 5)
+                        if "spread_pips" not in data:
+                            data["spread_pips"] = round(abs(data.get("ask", 0) - data.get("bid", 0)) * 10000, 1)
 
                         return data
             except Exception as e:
                 logger.warning(f"Failed parsing DWX_Account.txt: {e}")
 
-        # 2. Secondary: Calculate live state from DWX_Bars_USDCADm_M5.txt, DWX_Reports.txt, and .env
+        # 2. Secondary: Calculate live state from DWX_Bars_USDCAD_M5.txt / DWX_Bars_USDCADm_M5.txt, DWX_Reports.txt, and .env
         try:
             bid = cad_price
             ask = round(cad_price + 0.00014, 5)
-            bars_file = mt4_dir / "DWX_Bars_USDCADm_M5.txt"
-            if bars_file.exists():
+            if cad_existing:
+                bars_file = cad_existing[0]
                 lines = bars_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
                 if len(lines) > 1:
                     last_line = lines[-1].split(",")
@@ -1050,9 +1064,9 @@ class APIHandler(BaseHTTPRequestHandler):
             margin_level = round((equity / margin_used * 100), 1) if margin_used > 0 else 0.0
 
             return {
-                "account_number": int(os.getenv("ACCOUNT_NUMBER", "69800896")),
-                "company": os.getenv("ACCOUNT_SERVER", "Exness Technologies Ltd"),
-                "account_name": "Standard MT4",
+                "account_number": int(os.getenv("ACCOUNT_NUMBER", "70704655")),
+                "company": os.getenv("ACCOUNT_SERVER", "Exness-Trial9"),
+                "account_name": "RawSpread MT4",
                 "currency": "USD",
                 "balance": balance,
                 "equity": equity,
@@ -1079,6 +1093,7 @@ class APIHandler(BaseHTTPRequestHandler):
         return self.controller.get_status()
 
     def _get_account(self) -> Dict[str, Any]:
+        mt4_dir = auto_detect_mt4_files_dir()
         acc_info = self._read_mt4_account_info()
         if acc_info is not None:
             # Sync live balance into database active account record
@@ -1108,9 +1123,9 @@ class APIHandler(BaseHTTPRequestHandler):
                     bal = float(active.get("balance", 5000.0))
                     eq = float(active.get("equity", bal))
                     return {
-                        "account_number": int("".join(filter(str.isdigit, str(active["account_number"])))) if any(c.isdigit() for c in str(active["account_number"])) else 69800896,
+                        "account_number": int("".join(filter(str.isdigit, str(active["account_number"])))) if any(c.isdigit() for c in str(active["account_number"])) else 70704655,
                         "company": active.get("broker", "Exness Technologies Ltd"),
-                        "account_name": active.get("name", "Standard MT4"),
+                        "account_name": active.get("name", "RawSpread MT4"),
                         "currency": active.get("currency", "USD"),
                         "balance": bal,
                         "equity": eq,
@@ -1119,10 +1134,10 @@ class APIHandler(BaseHTTPRequestHandler):
                         "margin_level": 0.0,
                         "profit": 0.0,
                         "leverage": int(active.get("leverage", 2000)),
-                        "symbol": "USDCADm",
-                        "bid": 1.42500,
-                        "ask": 1.42514,
-                        "spread_pips": 1.4,
+                        "symbol": "USDCAD" if (mt4_dir and (mt4_dir / "DWX_Bars_USDCAD_M5.txt").exists()) else "USDCADm",
+                        "bid": 1.42150,
+                        "ask": 1.42150,
+                        "spread_pips": 0.0,
                         "digits": 5,
                         "trades_today": 0,
                         "open_orders_count": 0,
@@ -1134,9 +1149,9 @@ class APIHandler(BaseHTTPRequestHandler):
         # Fallback to defaults
         balance = float(getattr(self.controller._config, "initial_balance", 5000.0)) if self.controller._config else 5000.0
         return {
-            "account_number": int(os.getenv("ACCOUNT_NUMBER", "69800896")),
-            "company": os.getenv("ACCOUNT_SERVER", "Exness Technologies Ltd"),
-            "account_name": "Standard MT4",
+            "account_number": int(os.getenv("ACCOUNT_NUMBER", "70704655")),
+            "company": os.getenv("ACCOUNT_SERVER", "Exness-Trial9"),
+            "account_name": "RawSpread MT4",
             "currency": "USD",
             "balance": balance,
             "equity": balance,
@@ -1166,7 +1181,7 @@ class APIHandler(BaseHTTPRequestHandler):
         open_tickets = set()
 
         acc_info = self._read_mt4_account_info()
-        default_acc_num = int(os.getenv("ACCOUNT_NUMBER", "69800896"))
+        default_acc_num = int(os.getenv("ACCOUNT_NUMBER", "70704655"))
         active_account = acc_info.get("account_number", default_acc_num) if acc_info else default_acc_num
 
         # 1. Running / open orders from live MT4 state
@@ -1340,21 +1355,35 @@ class APIHandler(BaseHTTPRequestHandler):
         else:
             tf = "M5"
 
-        pair_name = "USDCAD"
+        clean_sym = req_sym.replace("/", "").strip()
+        base_pair = clean_sym[:-1] if clean_sym.endswith("M") else clean_sym
+        if not base_pair:
+            base_pair = "USDCAD"
+
         candidate_files = [
-            f"DWX_Bars_{pair_name}m_{tf}.txt",
-            f"DWX_Bars_{pair_name}_{tf}.txt",
-            f"DWX_Bars_{pair_name}m_M5.txt",
-            f"DWX_Bars_{pair_name}_M5.txt",
+            f"DWX_Bars_{base_pair}_{tf}.txt",
+            f"DWX_Bars_{base_pair}m_{tf}.txt",
+            f"DWX_Bars_{base_pair}_{req_tf}.txt",
+            f"DWX_Bars_{base_pair}m_{req_tf}.txt",
+            f"DWX_Bars_USDCAD_{tf}.txt",
+            f"DWX_Bars_USDCADm_{tf}.txt",
         ]
 
         if mt4_dir and mt4_dir.exists():
-            bars_file = None
+            matched_files = []
             for cand in candidate_files:
                 p = mt4_dir / cand
-                if p.exists():
-                    bars_file = p
-                    break
+                if p.exists() and p not in matched_files:
+                    matched_files.append(p)
+
+            if matched_files:
+                try:
+                    matched_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                except Exception:
+                    pass
+                bars_file = matched_files[0]
+            else:
+                bars_file = None
 
             if bars_file and bars_file.exists():
                 try:
@@ -1458,8 +1487,10 @@ class APIHandler(BaseHTTPRequestHandler):
         detected_files = auto_detect_mt4_files_dir()
         detected_exe = auto_detect_mt4_exe()
         settings = self._get_settings()
-        curr_acc = settings.get("ACCOUNT_NUMBER", "69800896")
-        curr_srv = settings.get("ACCOUNT_SERVER", "Exness-Trial8")
+        acc_info = self._read_mt4_account_info()
+        curr_acc = str(acc_info.get("account_number")) if acc_info and acc_info.get("account_number") else settings.get("ACCOUNT_NUMBER", "70704655")
+        curr_srv = str(acc_info.get("company")) if acc_info and acc_info.get("company") else settings.get("ACCOUNT_SERVER", "Exness-Trial9")
+        curr_sym = str(acc_info.get("symbol")) if acc_info and acc_info.get("symbol") else ("USDCAD" if (detected_files and (detected_files / "DWX_Bars_USDCAD_M5.txt").exists()) else "USDCADm")
         return {
             "status": "ok",
             "detected_files_dir": str(detected_files) if detected_files else "",
@@ -1467,7 +1498,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "mt4_process_running": is_mt4_running(),
             "current_account": curr_acc,
             "current_server": curr_srv,
-            "symbol": "USDCADm",
+            "symbol": curr_sym,
         }
 
     def _post_account_connect(self) -> Dict[str, Any]:
@@ -1497,10 +1528,13 @@ class APIHandler(BaseHTTPRequestHandler):
             # Auto-detect exe
             exe_path = auto_detect_mt4_exe()
 
+            detected_sym = "USDCAD" if (files_dir and (files_dir / "DWX_Bars_USDCAD_M5.txt").exists()) else "USDCADm"
+            sym_to_use = str(data.get("symbol") or env_settings.get("TRADING_SYMBOL") or detected_sym).strip()
+
             # Update .env
             env_updates = {
                 "ACCOUNT_NUMBER": account_num,
-                "TRADING_SYMBOL": "USDCADm",
+                "TRADING_SYMBOL": sym_to_use,
             }
             if server:
                 env_updates["ACCOUNT_SERVER"] = server
@@ -1551,14 +1585,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 try:
                     acc_int = int("".join(filter(str.isdigit, account_num)))
                 except Exception:
-                    acc_int = int(os.getenv("ACCOUNT_NUMBER", "69800896"))
+                    acc_int = int(os.getenv("ACCOUNT_NUMBER", "70704655"))
 
                 acc_dict["account_number"] = acc_int
                 if server:
                     acc_dict["company"] = server
                 if "broker" in data and data["broker"]:
                     acc_dict["company"] = data["broker"]
-                acc_dict["symbol"] = "USDCADm"
+                acc_dict["symbol"] = sym_to_use
                 acc_dict["currency"] = "USD"
                 acc_dict["pairs"] = {
                     "USDCADm": {"bid": round(cad_price, 5), "ask": round(cad_price + 0.00014, 5), "spread_pips": 1.4},
@@ -1708,7 +1742,7 @@ class APIHandler(BaseHTTPRequestHandler):
             try:
                 acc_int = int("".join(filter(str.isdigit, acc_num)))
             except Exception:
-                acc_int = 69800896
+                acc_int = int(os.getenv("ACCOUNT_NUMBER", "70704655"))
 
             acc_dict["account_number"] = acc_int
             acc_dict["company"] = broker or server or "Exness"

@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { AccountInfo, BridgeStatus, Candle, Position, Settings, TradingSignal } from '../types/trading';
 
 const defaultAccount: AccountInfo = {
-  account_number: '69800896',
+  account_number: '70704655',
   company: 'Exness Technologies Ltd',
   currency: 'USD',
   balance: 5000.00,
@@ -15,10 +15,10 @@ const defaultAccount: AccountInfo = {
   margin_level: 0,
   profit: 0,
   leverage: 2000,
-  symbol: 'USDCADm',
-  bid: 1.42546,
-  ask: 1.42560,
-  spread_pips: 1.4,
+  symbol: 'USDCAD',
+  bid: 1.42150,
+  ask: 1.42150,
+  spread_pips: 0.0,
   digits: 5,
   orders: [],
   trades_today: 0,
@@ -66,7 +66,7 @@ export function useTradingStream() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const activeAccountRef = useRef<string | number>('69800896');
+  const activeAccountRef = useRef<string | number>('70704655');
 
   const refreshData = useCallback(async (accountNum?: string | number) => {
     if (accountNum !== undefined) {

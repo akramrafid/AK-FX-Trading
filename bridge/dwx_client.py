@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from engine.models import Candle
 
@@ -181,6 +181,10 @@ class DWXClient:
     def account_file(self) -> Path:
         return self.files_dir / "DWX_Account.txt"
 
+    @property
+    def market_data_file(self) -> Path:
+        return self.files_dir / "DWX_Market_Data.txt"
+
     def read_account_info(self) -> Optional[dict]:
         """Reads and parses the latest MT4 account state and open orders from DWX_Account.txt."""
         f = self.account_file
@@ -195,18 +199,85 @@ class DWXClient:
             logger.debug(f"Could not read DWX_Account.txt: {e}")
             return None
 
+    def read_market_quote(self, symbol: str) -> Optional[Tuple[Decimal, Decimal]]:
+        """[R3] Reads the latest live (bid, ask) quote for symbol from DWX_Market_Data.txt or DWX_Account.txt."""
+        clean_sym = symbol.strip().replace("/", "").upper()
+        # 1. Check DWX_Market_Data.txt
+        f = self.market_data_file
+        if f.exists():
+            try:
+                content = self.atomic_read(f)
+                if content.strip():
+                    data = json.loads(content)
+                    if isinstance(data, dict):
+                        for k, v in data.items():
+                            if k.upper().replace("/", "") == clean_sym and isinstance(v, dict):
+                                bid = Decimal(str(v.get("bid", 0)))
+                                ask = Decimal(str(v.get("ask", 0)))
+                                if bid > Decimal("0") and ask > Decimal("0"):
+                                    return (bid, ask)
+            except Exception as e:
+                logger.debug(f"Could not parse DWX_Market_Data.txt: {e}")
+
+        # 2. Check market_data dictionary within DWX_Account.txt
+        acc = self.read_account_info()
+        if acc and "market_data" in acc and isinstance(acc["market_data"], dict):
+            for k, v in acc["market_data"].items():
+                if k.upper().replace("/", "") == clean_sym and isinstance(v, dict):
+                    bid = Decimal(str(v.get("bid", 0)))
+                    ask = Decimal(str(v.get("ask", 0)))
+                    if bid > Decimal("0") and ask > Decimal("0"):
+                        return (bid, ask)
+
+        return None
+
+    def write_mock_market_data(self, symbol: str, bid: Decimal | float, ask: Decimal | float) -> None:
+        """Utility for test simulation: writes live market quote to DWX_Market_Data.txt."""
+        clean_sym = symbol.strip().replace("/", "").upper()
+        existing_data = {}
+        if self.market_data_file.exists():
+            try:
+                content = self.atomic_read(self.market_data_file)
+                if content.strip():
+                    existing_data = json.loads(content)
+            except Exception:
+                pass
+        existing_data[clean_sym] = {"bid": float(bid), "ask": float(ask)}
+        self.atomic_write(self.market_data_file, json.dumps(existing_data) + "\n")
+
+
     def get_bars_file(self, symbol: str, timeframe: str = "M5") -> Path:
         clean_symbol = symbol.strip().replace("/", "")
         clean_tf = timeframe.strip().upper()
-        exact_path = self.files_dir / f"DWX_Bars_{clean_symbol}_{clean_tf}.txt"
-        if exact_path.exists():
-            return exact_path
+
+        # Check symbol variations (e.g. USDCAD and USDCADm)
+        candidates = [clean_symbol]
+        if clean_symbol.endswith("m"):
+            candidates.append(clean_symbol[:-1])
+        else:
+            candidates.append(clean_symbol + "m")
+
+        existing_matches: List[Path] = []
+        for cand in candidates:
+            p = self.files_dir / f"DWX_Bars_{cand}_{clean_tf}.txt"
+            if p.exists():
+                existing_matches.append(p)
+
+        if existing_matches:
+            if len(existing_matches) > 1:
+                try:
+                    existing_matches.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                except Exception:
+                    pass
+            return existing_matches[0]
+
         target_name = f"dwx_bars_{clean_symbol.lower()}_{clean_tf.lower()}.txt"
         if self.files_dir.is_dir():
             for f in self.files_dir.iterdir():
                 if f.name.lower() == target_name:
                     return f
-        return exact_path
+
+        return self.files_dir / f"DWX_Bars_{clean_symbol}_{clean_tf}.txt"
 
     # -------------------------------------------------------------------------
     # Atomic File Operations with Exponential Backoff
@@ -467,3 +538,34 @@ class DWXClient:
         lines = [line.strip() for line in existing.splitlines() if line.strip()]
         lines.append(json.dumps(report.to_dict()))
         self.atomic_write(self.reports_file, "\n".join(lines) + "\n")
+
+    def write_mock_account(
+        self,
+        balance: Decimal | float = 10000.0,
+        equity: Optional[Decimal | float] = None,
+        timestamp: Optional[datetime] = None,
+        orders: Optional[list] = None,
+        market_data: Optional[dict] = None,
+        raw_json_str: Optional[str] = None,
+    ) -> None:
+        """Utility for test simulation: writes account state to DWX_Account.txt."""
+        if raw_json_str is not None:
+            self.atomic_write(self.account_file, raw_json_str)
+            return
+
+        ts = timestamp or datetime.now(timezone.utc)
+        data = {
+            "balance": float(balance),
+            "equity": float(equity if equity is not None else balance),
+            "currency": "USD",
+            "timestamp": ts.isoformat(),
+            "orders": orders or [],
+            "market_data": market_data or {},
+        }
+        self.atomic_write(self.account_file, json.dumps(data) + "\n")
+        if timestamp is not None:
+            try:
+                os.utime(self.account_file, (ts.timestamp(), ts.timestamp()))
+            except Exception:
+                pass
+

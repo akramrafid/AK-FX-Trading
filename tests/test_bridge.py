@@ -491,6 +491,7 @@ class TestBridgeExecutor(unittest.TestCase):
             partial_bank_pct=Decimal("0.0"),
             breakeven_trigger_r=Decimal("2.0"),
         )
+        self.executor.allow_post_entry_modifications = True
         self.executor.active_trades[1001] = buy_trade
 
         # Bar 1: High only reaches 1.08700 (+1.0R) -> BE not triggered

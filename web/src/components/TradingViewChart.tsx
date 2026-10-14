@@ -46,7 +46,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   spreadPips,
   orders = [],
   tradeHistory = [],
-  activeAccount = '69800896',
+  activeAccount = '70704655',
   activeLedgerTab = 'running',
   onLedgerTabChange,
 }) => {

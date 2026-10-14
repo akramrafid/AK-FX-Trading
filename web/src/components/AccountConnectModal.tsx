@@ -29,8 +29,8 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
   const [isActive, setIsActive] = useState(true);
   const [detectedPath, setDetectedPath] = useState('');
   const [detectedExe, setDetectedExe] = useState('');
-  const [detectedMT4Account, setDetectedMT4Account] = useState('69800896');
-  const [detectedMT4Server, setDetectedMT4Server] = useState('Exness-Trial8');
+  const [detectedMT4Account, setDetectedMT4Account] = useState('70704655');
+  const [detectedMT4Server, setDetectedMT4Server] = useState('Exness-Trial9');
   const [isDetecting, setIsDetecting] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
@@ -54,12 +54,12 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
     setStatusMsg(null);
     try {
       const data = await api.getAccountDetect();
-      const acc = data.current_account || '69800896';
-      const srv = data.current_server || 'Exness-Trial8';
+      const acc = data.current_account || '70704655';
+      const srv = data.current_server || 'Exness-Trial9';
       setAccountNumber(acc);
       setServer(srv);
       setBroker('Exness Technologies Ltd');
-      setNickname(`Standard (${srv})`);
+      setNickname(`RawSpread (${srv})`);
       setLeverage('2000');
       setBalance('5000.00');
       setCurrency('USD');
@@ -67,10 +67,10 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
       if (data.detected_exe_path) setDetectedExe(data.detected_exe_path);
       setStatusMsg({ text: `Auto-filled active MT4 account ID: ${acc} (${srv}).` });
     } catch {
-      setAccountNumber('69800896');
-      setServer('Exness-Trial8');
+      setAccountNumber('70704655');
+      setServer('Exness-Trial9');
       setBroker('Exness Technologies Ltd');
-      setNickname('Standard (Exness-Trial8)');
+      setNickname('RawSpread (Exness-Trial9)');
       setLeverage('2000');
       setBalance('5000.00');
       setStatusMsg({ text: 'Loaded default active MT4 credentials.' });
@@ -83,8 +83,8 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
     switch (preset) {
       case 'Exness Standard':
         setBroker('Exness Technologies Ltd');
-        setServer('Exness-Trial8');
-        setNickname('Standard (Exness-Trial8)');
+        setServer('Exness-Trial9');
+        setNickname('Standard (Exness-Trial9)');
         setLeverage('2000');
         setBalance('5000.00');
         break;
@@ -318,7 +318,7 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
                 value={server}
                 onChange={(e) => setServer(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-accent-lime"
-                placeholder="e.g. Exness-Trial8, ICMarkets-Live01"
+                placeholder="e.g. Exness-Trial9, ICMarkets-Live01"
               />
             </div>
           </div>
@@ -333,7 +333,7 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
                 value={accountNumber}
                 onChange={(e) => setAccountNumber(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-accent-lime font-bold"
-                placeholder="e.g. 69800896 or 12345678"
+                placeholder="e.g. 70704655 or 12345678"
               />
             </div>
             <div>

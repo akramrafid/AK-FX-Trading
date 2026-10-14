@@ -217,22 +217,38 @@ def evaluate_confirmation(
 def evaluate_s2_m1_validity(
     c1: Candle,
     l_candle: Candle,
+    equal_tolerance: float = 0.0,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
-    [Rule S2] M1 validity check for SELL setups.
-    c1 = first bearish M1 candle of the bearish run.
-    L = most recent bullish M1 candle before c1.
-    Require: c1.close < L.close.
-    c1's high may exceed L's high; never reject for that. [A2]
+    [Rule S2] M1 method gate for SELL setups.
+    c1 = first bearish M1 candle (c1.close < c1.open).
+    L = M1 candle immediately before c1; must be bullish (L.close > L.open). [A6]
+    Two methods (one must hold):
+      S2-A "Equal top": c1.high == L.high (tolerance EQUAL_TOLERANCE_POINTS = 0). [A2]
+      S2-B "Bullish wick swapped": c1.high > L.high.
+    If c1.high < L.high, neither holds: no trade.
     """
     c1_bearish = c1.close < c1.open
     l_bullish = l_candle.close > l_candle.open
-    close_valid = c1.close < l_candle.close
-    passed = bool(c1_bearish and l_bullish and close_valid)
+
+    method: Optional[str] = None
+    passed = False
+
+    if c1_bearish and l_bullish:
+        if abs(c1.high - l_candle.high) <= equal_tolerance:
+            method = "equal"
+            passed = True
+        elif c1.high > l_candle.high:
+            method = "wick_swap"
+            passed = True
+        else:
+            method = None
+            passed = False
 
     eval_data = {
         "rule_id": "S2",
         "pass": passed,
+        "method": method,
         "values": {
             "c1_open": c1.open,
             "c1_close": c1.close,
@@ -242,7 +258,8 @@ def evaluate_s2_m1_validity(
             "l_close": l_candle.close,
             "l_high": l_candle.high,
             "l_bullish": l_bullish,
-            "c1_close_lt_l_close": close_valid,
+            "method": method,
+            "equal_tolerance": equal_tolerance,
         },
     }
     return passed, eval_data
@@ -251,21 +268,38 @@ def evaluate_s2_m1_validity(
 def evaluate_b2_m1_validity(
     c1: Candle,
     l_candle: Candle,
+    equal_tolerance: float = 0.0,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
-    [Rule B2] M1 wick check for BUY setups.
-    L = the bearish M1 candle immediately before c1 (the first bullish candle of the run).
-    Require c1.low <= L.low (the bearish candle's wick is smaller than or equal to the bullish candle's wick).
-    Equal passes. Nothing else is checked here.
+    [Rule B2] M1 method gate for BUY setups.
+    c1 = first bullish M1 candle (c1.close > c1.open).
+    L = M1 candle immediately before c1; must be bearish (L.close < L.open). [A6]
+    Two methods (one must hold):
+      B2-A "Equal low": c1.low == L.low (tolerance EQUAL_TOLERANCE_POINTS = 0). [A2]
+      B2-B "Bearish wick swapped by bullish": c1.low < L.low.
+    If c1.low > L.low, neither holds: no trade.
     """
     c1_bullish = c1.close > c1.open
     l_bearish = l_candle.close < l_candle.open
-    wick_valid = c1.low <= l_candle.low
-    passed = bool(c1_bullish and l_bearish and wick_valid)
+
+    method: Optional[str] = None
+    passed = False
+
+    if c1_bullish and l_bearish:
+        if abs(c1.low - l_candle.low) <= equal_tolerance:
+            method = "equal"
+            passed = True
+        elif c1.low < l_candle.low:
+            method = "wick_swap"
+            passed = True
+        else:
+            method = None
+            passed = False
 
     eval_data = {
         "rule_id": "B2",
         "pass": passed,
+        "method": method,
         "values": {
             "c1_open": c1.open,
             "c1_close": c1.close,
@@ -275,7 +309,8 @@ def evaluate_b2_m1_validity(
             "l_close": l_candle.close,
             "l_low": l_candle.low,
             "l_bearish": l_bearish,
-            "c1_low_le_l_low": wick_valid,
+            "method": method,
+            "equal_tolerance": equal_tolerance,
         },
     }
     return passed, eval_data
@@ -389,8 +424,8 @@ def calculate_s5_stop_loss(
 ) -> Tuple[float, Dict[str, Any]]:
     """
     [Rule S5] Stop-loss for SELL setups.
-    The high of c1 (its wick included). Not the highest of the three. Not anything else.
-    The stop is always above entry.
+    The top of the wick of c1 (c1.high).
+    Stop-loss is always above entry.
     """
     stop_loss = float(c1.high)
     passed = True if entry is None else (stop_loss > entry)
@@ -402,32 +437,33 @@ def calculate_s5_stop_loss(
             "c1_high": float(c1.high),
             "entry": entry,
             "sl_above_entry": passed,
-            "reference": "c1_extreme",
+            "reference": "c1_wick_extreme",
         },
     }
     return stop_loss, eval_data
 
 
 def calculate_b5_stop_loss(
-    l_candle: Candle,
+    c1: Candle,
     entry: Optional[float] = None,
 ) -> Tuple[float, Dict[str, Any]]:
     """
     [Rule B5] Stop-loss for BUY setups.
-    The low of L, the bearish candle (wick included), per latest buy example.
-    Not the low of c1. The stop is always below entry.
+    The bottom of the wick of c1 (c1.low).
+    In method B2-B this is below L.low; in B2-A they are equal. [A3]
+    Stop-loss is always below entry.
     """
-    stop_loss = float(l_candle.low)
+    stop_loss = float(c1.low)
     passed = True if entry is None else (stop_loss < entry)
     eval_data = {
         "rule_id": "B5",
         "pass": passed,
         "values": {
             "stop_loss": stop_loss,
-            "l_low": float(l_candle.low),
+            "c1_low": float(c1.low),
             "entry": entry,
             "sl_below_entry": passed,
-            "reference": "l_extreme",
+            "reference": "c1_wick_extreme",
         },
     }
     return stop_loss, eval_data
@@ -440,10 +476,10 @@ def calculate_s6_take_profit(
 ) -> Tuple[float, Dict[str, Any]]:
     """
     [Rule S6] Take-profit for SELL setups.
-    entry - 10 * (SL - entry). Risk-reward 1:10. [A3]
+    entry - 10 * (SL - entry). Risk-reward 1:10.
     """
     risk = stop_loss - entry
-    take_profit = entry - (rr_multiple * risk)
+    take_profit = round(entry - (rr_multiple * risk), 5)
     eval_data = {
         "rule_id": "S6",
         "pass": True,
@@ -469,7 +505,7 @@ def calculate_b6_take_profit(
     entry + 10 * (entry - SL). Risk-reward 1:10.
     """
     risk = entry - stop_loss
-    take_profit = entry + (rr_multiple * risk)
+    take_profit = round(entry + (rr_multiple * risk), 5)
     eval_data = {
         "rule_id": "B6",
         "pass": True,
@@ -496,9 +532,11 @@ def format_rule_log_record(
     status: Optional[str] = None,
     evaluations: Optional[List[Dict[str, Any]]] = None,
     timestamp: Optional[Any] = None,
+    method: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Creates a structured log record listing each rule ID with pass/fail and compared values.
+    Creates a structured log record listing each rule ID with pass/fail and compared values,
+    plus Stage 2 method name ("equal" or "wick_swap") when it passes.
     If a setup is skipped, failing_rule identifies which rule failed.
     """
     effective_rules = rules if rules is not None else (evaluations if evaluations is not None else [])
@@ -506,15 +544,28 @@ def format_rule_log_record(
     ts_str = effective_ts.isoformat() if hasattr(effective_ts, "isoformat") else str(effective_ts) if effective_ts else None
     effective_status = status if status is not None else ("PASSED" if setup_passed else "SKIPPED")
 
+    # Resolve Stage 2 method name
+    stage2_method = method
+    if stage2_method is None:
+        for r in effective_rules:
+            if r.get("rule_id") in ("S2", "B2") and r.get("pass"):
+                stage2_method = r.get("method") or r.get("values", {}).get("method")
+                break
+
+    merged_details = dict(details or {})
+    if stage2_method:
+        merged_details["method"] = stage2_method
+
     return {
         "timestamp": ts_str,
         "timeframe": timeframe,
         "direction": direction,
         "status": effective_status,
         "setup_passed": setup_passed or (effective_status == "PASSED"),
+        "method": stage2_method,
         "failing_rule": failing_rule,
         "rules": effective_rules,
         "evaluations": effective_rules,
-        "details": details or {},
+        "details": merged_details,
     }
 

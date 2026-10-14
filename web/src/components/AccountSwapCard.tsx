@@ -40,7 +40,7 @@ export const AccountSwapCard: React.FC<AccountSwapCardProps> = ({
   const [copied, setCopied] = useState(false);
 
   const activeAcc = accountsList.find((a) => (activeAccountId ? a.id === activeAccountId : a.is_active)) || accountsList[0];
-  const activeAccNum = activeAcc ? String(activeAcc.account_number) : String(account.account_number || '69800896');
+  const activeAccNum = activeAcc ? String(activeAcc.account_number) : String(account.account_number || '70704655');
   const activeBroker = activeAcc?.broker || account.company || 'Exness';
   const displayBalance = (activeAcc?.balance !== undefined && activeAcc.balance > 0)
     ? activeAcc.balance

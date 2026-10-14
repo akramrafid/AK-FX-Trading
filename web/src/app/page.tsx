@@ -17,10 +17,10 @@ import { Bell } from 'lucide-react';
 const defaultSeedAccounts: UserAccount[] = [
   {
     id: 'acc-1',
-    account_number: '69800896',
+    account_number: '70704655',
     broker: 'Exness Technologies Ltd',
-    server: 'Exness-Trial8',
-    name: 'Standard (Exness-Trial8)',
+    server: 'Exness-Trial9',
+    name: 'RawSpread (Exness-Trial9)',
     currency: 'USD',
     balance: 5000.00,
     equity: 5000.00,
@@ -130,7 +130,7 @@ export default function TradingDeskPage() {
             id: 'acc-live',
             account_number: accNumStr,
             broker: account.company || 'Exness Technologies Ltd',
-            server: account.company || 'Exness-Trial8',
+            server: account.company || 'Exness-Trial9',
             name: `${account.account_name || 'Standard'} (${account.company || 'Exness'})`,
             currency: account.currency || 'USD',
             balance: account.balance || 5000.0,
@@ -328,7 +328,7 @@ export default function TradingDeskPage() {
                 spreadPips={account.spread_pips}
                 orders={account.orders || []}
                 tradeHistory={closedTrades as any}
-                activeAccount={activeAccount?.account_number || account.account_number || '69800896'}
+                activeAccount={activeAccount?.account_number || account.account_number || '70704655'}
                 activeLedgerTab={activeLedgerTab}
                 onLedgerTabChange={(tab) => setActiveLedgerTab(tab)}
               />
@@ -374,7 +374,7 @@ export default function TradingDeskPage() {
             <span>Ak Trading System • Institutional MT4 C1 Wick-Swap Terminal</span>
           </div>
           <div className="text-[11px] text-slate-400">
-            Connected Account: ID: {activeAccount?.account_number || account.account_number || '69800896'} • Session: 07:00 – 18:00 UTC (USDCAD Dedicated)
+            Connected Account: ID: {activeAccount?.account_number || account.account_number || '70704655'} • Session: 07:00 – 18:00 UTC (USDCAD Dedicated)
           </div>
         </footer>
       </div>

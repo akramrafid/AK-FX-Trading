@@ -63,7 +63,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
 
-  const activeAccNum = activeAccount?.account_number || '69800896';
+  const activeAccNum = activeAccount?.account_number || '70704655';
   const activeBrokerName = activeAccount?.broker || 'Exness';
 
   useEffect(() => {

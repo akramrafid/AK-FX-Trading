@@ -138,9 +138,11 @@ class RuleEngine:
         breakeven_trigger_r: Optional[float] = None,
         enable_intrabar_sweep: bool = False,
         strategy_mode: str = "c1_wickswap",
+        equal_tolerance_points: float = 0.0,
     ) -> None:
         self.symbol = symbol
         self.strategy_mode = strategy_mode.lower()
+        self.equal_tolerance_points = equal_tolerance_points
         self.evaluation_logs: List[Dict[str, Any]] = []
         self.last_evaluation_log: Optional[Dict[str, Any]] = None
         self.allow_variant_a = allow_variant_a
@@ -363,6 +365,7 @@ class RuleEngine:
             check_m5=check_m5,
             check_m15=check_m15,
             enable_intrabar_sweep=True,
+            equal_tolerance_points=0.0,
             **kwargs,
         )
 
@@ -828,36 +831,36 @@ class RuleEngine:
                 return None, log_rec
 
             # S2 & S3 — Scan M1 candles in H's window
-            last_bullish_l: Optional[Candle] = None
             cand_run: List[Candle] = []
             cand_l: Optional[Candle] = None
             last_s2_data: Optional[Dict[str, Any]] = None
             confirmed_run: Optional[Tuple[Candle, Candle, Candle, Candle, Dict[str, Any]]] = None
 
-            for m in m1_candles:
-                if m.close > m.open:
-                    # Bullish candle
-                    last_bullish_l = m
-                    if cand_run:
-                        # Non-qualifying candle interrupts run before c3 closes [A4]
-                        cand_run.clear()
-                        cand_l = None
-                elif m.close < m.open:
-                    # Bearish candle
-                    if not cand_run:
-                        # Candidate c1
-                        prior_l = last_bullish_l
-                        if prior_l is None and self._m1_history:
-                            for prev in reversed(self._m1_history):
-                                if prev.timestamp < m.timestamp and prev.close > prev.open:
-                                    prior_l = prev
-                                    break
-                        if prior_l is not None:
-                            s2_pass, s2_info = evaluate_s2_m1_validity(c1=m, l_candle=prior_l)
+            for i, m in enumerate(m1_candles):
+                # L is the candle immediately before c1 [A6]
+                if i > 0:
+                    prev_m = m1_candles[i - 1]
+                else:
+                    prev_m = None
+                    if self._m1_history:
+                        for prev in reversed(self._m1_history):
+                            if prev.timestamp < m.timestamp:
+                                prev_m = prev
+                                break
+
+                if not cand_run:
+                    # Candidate c1 (must be bearish: close < open)
+                    if m.close < m.open:
+                        if prev_m is not None:
+                            s2_pass, s2_info = evaluate_s2_m1_validity(
+                                c1=m,
+                                l_candle=prev_m,
+                                equal_tolerance=self.equal_tolerance_points,
+                            )
                             last_s2_data = s2_info
                             if s2_pass:
                                 cand_run = [m]
-                                cand_l = prior_l
+                                cand_l = prev_m
                             else:
                                 cand_run.clear()
                                 cand_l = None
@@ -865,22 +868,23 @@ class RuleEngine:
                             last_s2_data = {
                                 "rule_id": "S2",
                                 "pass": False,
+                                "method": None,
                                 "values": {
                                     "c1_timestamp": str(m.timestamp),
-                                    "reason": "no_prior_bullish_l",
+                                    "reason": "no_prior_l_candle",
                                 },
                             }
                             cand_run.clear()
                             cand_l = None
-                    else:
-                        # c2 or c3
+                else:
+                    # c2 or c3 (must be bearish: close < open)
+                    if m.close < m.open:
                         cand_run.append(m)
                         if len(cand_run) == 3:
                             confirmed_run = (cand_l, cand_run[0], cand_run[1], cand_run[2], last_s2_data)
                             break
-                else:
-                    # close == open: strictly neither; interrupts run [A4]
-                    if cand_run:
+                    else:
+                        # Non-qualifying candle interrupts run before c3 closes [A4]
                         cand_run.clear()
                         cand_l = None
 
@@ -906,6 +910,7 @@ class RuleEngine:
                 tp_price, s6_data = calculate_s6_take_profit(entry_price, sl_price, rr_multiple=self.reward_risk_ratio)
 
                 rules = [s1_data, s2_data, s3_data, s4_data, s5_data, s6_data]
+                stage2_method = s2_data.get("method") or s2_data.get("values", {}).get("method")
                 log_rec = format_rule_log_record(
                     direction="SELL",
                     timeframe=timeframe,
@@ -913,10 +918,12 @@ class RuleEngine:
                     rules=rules,
                     setup_passed=True,
                     failing_rule=None,
+                    method=stage2_method,
                     details={
                         "entry": entry_price,
                         "stop_loss": sl_price,
                         "take_profit": tp_price,
+                        "method": stage2_method,
                         "c1_timestamp": str(c1.timestamp),
                         "c3_timestamp": str(c3.timestamp),
                     },
@@ -994,36 +1001,36 @@ class RuleEngine:
                 return None, log_rec
 
             # B2 & B3 — Scan M1 candles in H's window
-            last_bearish_l: Optional[Candle] = None
             cand_run: List[Candle] = []
             cand_l: Optional[Candle] = None
             last_b2_data: Optional[Dict[str, Any]] = None
             confirmed_run: Optional[Tuple[Candle, Candle, Candle, Candle, Dict[str, Any]]] = None
 
-            for m in m1_candles:
-                if m.close < m.open:
-                    # Bearish candle
-                    last_bearish_l = m
-                    if cand_run:
-                        # Non-qualifying candle interrupts run before c3 closes [A4]
-                        cand_run.clear()
-                        cand_l = None
-                elif m.close > m.open:
-                    # Bullish candle
-                    if not cand_run:
-                        # Candidate c1
-                        prior_l = last_bearish_l
-                        if prior_l is None and self._m1_history:
-                            for prev in reversed(self._m1_history):
-                                if prev.timestamp < m.timestamp and prev.close < prev.open:
-                                    prior_l = prev
-                                    break
-                        if prior_l is not None:
-                            b2_pass, b2_info = evaluate_b2_m1_validity(c1=m, l_candle=prior_l)
+            for i, m in enumerate(m1_candles):
+                # L is the candle immediately before c1 [A6]
+                if i > 0:
+                    prev_m = m1_candles[i - 1]
+                else:
+                    prev_m = None
+                    if self._m1_history:
+                        for prev in reversed(self._m1_history):
+                            if prev.timestamp < m.timestamp:
+                                prev_m = prev
+                                break
+
+                if not cand_run:
+                    # Candidate c1 (must be bullish: close > open)
+                    if m.close > m.open:
+                        if prev_m is not None:
+                            b2_pass, b2_info = evaluate_b2_m1_validity(
+                                c1=m,
+                                l_candle=prev_m,
+                                equal_tolerance=self.equal_tolerance_points,
+                            )
                             last_b2_data = b2_info
                             if b2_pass:
                                 cand_run = [m]
-                                cand_l = prior_l
+                                cand_l = prev_m
                             else:
                                 cand_run.clear()
                                 cand_l = None
@@ -1031,22 +1038,23 @@ class RuleEngine:
                             last_b2_data = {
                                 "rule_id": "B2",
                                 "pass": False,
+                                "method": None,
                                 "values": {
                                     "c1_timestamp": str(m.timestamp),
-                                    "reason": "no_prior_bearish_l",
+                                    "reason": "no_prior_l_candle",
                                 },
                             }
                             cand_run.clear()
                             cand_l = None
-                    else:
-                        # c2 or c3
+                else:
+                    # c2 or c3 (must be bullish: close > open)
+                    if m.close > m.open:
                         cand_run.append(m)
                         if len(cand_run) == 3:
                             confirmed_run = (cand_l, cand_run[0], cand_run[1], cand_run[2], last_b2_data)
                             break
-                else:
-                    # close == open: strictly neither; interrupts run [A4]
-                    if cand_run:
+                    else:
+                        # Non-qualifying candle interrupts run before c3 closes [A4]
                         cand_run.clear()
                         cand_l = None
 
@@ -1054,7 +1062,7 @@ class RuleEngine:
                 l_cand, c1, c2, c3, b2_data = confirmed_run
                 b3_pass, b3_data = evaluate_b3_m1_confirmation([c1, c2, c3])
                 entry_price, b4_data = calculate_b4_entry(c3)
-                sl_price, b5_data = calculate_b5_stop_loss(l_cand, entry=entry_price)
+                sl_price, b5_data = calculate_b5_stop_loss(c1, entry=entry_price)
                 if not b5_data["pass"]:
                     rules = [b1_data, b2_data, b3_data, b4_data, b5_data]
                     log_rec = format_rule_log_record(
@@ -1072,6 +1080,7 @@ class RuleEngine:
                 tp_price, b6_data = calculate_b6_take_profit(entry_price, sl_price, rr_multiple=self.reward_risk_ratio)
 
                 rules = [b1_data, b2_data, b3_data, b4_data, b5_data, b6_data]
+                stage2_method = b2_data.get("method") or b2_data.get("values", {}).get("method")
                 log_rec = format_rule_log_record(
                     direction="BUY",
                     timeframe=timeframe,
@@ -1079,10 +1088,12 @@ class RuleEngine:
                     rules=rules,
                     setup_passed=True,
                     failing_rule=None,
+                    method=stage2_method,
                     details={
                         "entry": entry_price,
                         "stop_loss": sl_price,
                         "take_profit": tp_price,
+                        "method": stage2_method,
                         "c1_timestamp": str(c1.timestamp),
                         "c3_timestamp": str(c3.timestamp),
                     },

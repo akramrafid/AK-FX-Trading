@@ -47,19 +47,37 @@ def parse_simple_env_file(filepath: Path) -> Dict[str, str]:
     return env_vars
 
 
-# Strategy & Compliance Constants (Section 8)
+# Strategy & Compliance Constants (Section 9)
 RR_MULTIPLE: int = 10
 CONFIRM_CANDLES: int = 3
 HTF: list[str] = ["M5", "M15"]
 ENTRY_ORDER_TYPE: str = "market"
-SL_REFERENCE: str = "c1_extreme"
+EQUAL_TOLERANCE_POINTS: float = 0.0
+SL_REFERENCE: str = "c1_wick_extreme"
+M1_METHODS: list[str] = ["equal", "wick_swap"]
 
-# Strategy Assumptions (Section 9 [A1 - A5])
-A1_SWEEP_ON_FORMING_HTF: bool = True       # [A1] HTF sweep is read on the still-forming candle H
-A2_M1_VALIDITY_STRICT_CLOSE: bool = True   # [A2] c1.close < L.close for SELL, c1.close > L.close for BUY
-A3_RISK_REWARD_RATIO: float = 10.0         # [A3] Risk-to-reward ratio 1:10
-A4_RESET_ON_INTERRUPTION: bool = True      # [A4] Interrupted run resets and searches again
-A5_EXPIRE_ON_HTF_CLOSE: bool = True        # [A5] Setup expires when sweeping HTF candle closes
+# Strategy Assumptions (Section 10 [A1 - A6])
+A1_SWEEP_ON_FORMING_HTF: bool = True                  # [A1] HTF sweep is read on the still-forming candle H
+A2_EQUAL_TOLERANCE_POINTS: float = 0.0                 # [A2] Equal tolerance (0 = exact equality at broker precision)
+A3_SL_IS_C1_WICK_EXTREME: bool = True                 # [A3] Stop is c1's wick extreme (c1.high for sell, c1.low for buy)
+A4_RESET_ON_INTERRUPTION: bool = True                 # [A4] Interrupted run resets and searches again
+A5_EXPIRE_ON_HTF_CLOSE: bool = True                   # [A5] Setup expires when sweeping HTF candle closes
+A6_L_MUST_BE_IMMEDIATE_PREVIOUS_OPPOSITE: bool = True # [A6] L must be candle right before c1 and opposite colour
+
+# Exact 1% Risk Sizing Config Constants (Section 6)
+RISK_PERCENT: float = 1.0
+RISK_BASIS: str = "balance"
+COMMISSION_PER_LOT_ROUND_TURN: float = 7.00
+LOT_ROUNDING: str = "floor"
+MIN_LOT_POLICY: str = "skip"
+BALANCE_MAX_AGE_SECONDS: float = 5.0
+RISK_DEVIATION_TOLERANCE_PCT: float = 5.0
+
+# Sizing Assumptions (Section 7 [A1 - A4])
+A1_ACCOUNT_CURRENCY: str = "USD"               # [A1] The account currency is USD
+A2_COMMISSION_PER_LOT_ROUND_TURN: float = 7.00 # [A2] Commission is $7.00 per lot round-turn, derived from history
+A3_RISK_BASIS_IS_BALANCE: bool = True          # [A3] "Balance" means MT4 account balance, not equity
+A4_NO_POST_ENTRY_MODIFICATIONS: bool = True    # [A4] No break-even, trailing, partial close or early close
 
 
 @dataclass
@@ -78,6 +96,8 @@ class AppConfig:
     htf_timeframes: list[str] = field(default_factory=lambda: list(HTF))
     entry_order_type: str = ENTRY_ORDER_TYPE
     sl_reference: str = SL_REFERENCE
+    equal_tolerance_points: float = EQUAL_TOLERANCE_POINTS
+    m1_methods: list[str] = field(default_factory=lambda: list(M1_METHODS))
     initial_balance: Decimal = Decimal("10000.00")
     risk_pct: Decimal = Decimal("0.01")  # 1.0%
 
@@ -106,6 +126,16 @@ class AppConfig:
 
     # MT4 Terminal Executable Path
     mt4_exe_path: Optional[Path] = None
+
+    # Exact 1% Risk Sizing Config (Section 6)
+    risk_percent: float = RISK_PERCENT
+    risk_basis: str = RISK_BASIS
+    commission_per_lot_round_turn: float = COMMISSION_PER_LOT_ROUND_TURN
+    lot_rounding: str = LOT_ROUNDING
+    min_lot_policy: str = MIN_LOT_POLICY
+    balance_max_age_seconds: float = BALANCE_MAX_AGE_SECONDS
+    risk_deviation_tolerance_pct: float = RISK_DEVIATION_TOLERANCE_PCT
+    allow_post_entry_modifications: bool = not A4_NO_POST_ENTRY_MODIFICATIONS
 
     def __post_init__(self) -> None:
         self.mt4_files_dir = Path(self.mt4_files_dir).resolve()
@@ -178,4 +208,12 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         mt4_exe_path=Path(get_var("MT4_EXE_PATH", r"C:\Program Files (x86)\MetaTrader 4\terminal.exe"))
         if get_var("MT4_EXE_PATH", r"C:\Program Files (x86)\MetaTrader 4\terminal.exe").strip()
         else None,
+        risk_percent=float(get_var("RISK_PERCENT", str(RISK_PERCENT))),
+        risk_basis=get_var("RISK_BASIS", RISK_BASIS),
+        commission_per_lot_round_turn=float(get_var("COMMISSION_PER_LOT_ROUND_TURN", str(COMMISSION_PER_LOT_ROUND_TURN))),
+        lot_rounding=get_var("LOT_ROUNDING", LOT_ROUNDING),
+        min_lot_policy=get_var("MIN_LOT_POLICY", MIN_LOT_POLICY),
+        balance_max_age_seconds=float(get_var("BALANCE_MAX_AGE_SECONDS", str(BALANCE_MAX_AGE_SECONDS))),
+        risk_deviation_tolerance_pct=float(get_var("RISK_DEVIATION_TOLERANCE_PCT", str(RISK_DEVIATION_TOLERANCE_PCT))),
+        allow_post_entry_modifications=get_var("ALLOW_POST_ENTRY_MODIFICATIONS", "false").lower() in ("true", "1", "yes"),
     )

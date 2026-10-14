@@ -16,11 +16,37 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
-from typing import Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from bridge.dwx_client import DWXClient, ExecutionReport, OrderType, TradeCommand
-from bridge.sizing import PositionSizer, SizingResult
+from bridge.sizing import (
+    PositionSizer,
+    SizingResult,
+    calculate_r2_risk_amount,
+    calculate_r3_quote_distance,
+    calculate_r4_per_lot_loss,
+    calculate_r5_lot_size,
+    calculate_r8_realized_risk,
+    format_r8_order_record,
+    get_r4_tick_value,
+    prepare_r6_order_prices,
+    read_r1_account_balance,
+    verify_r7_no_post_entry_modifications,
+)
 from bridge.watchdog import BridgeWatchdog
+from config import (
+    A1_ACCOUNT_CURRENCY,
+    A2_COMMISSION_PER_LOT_ROUND_TURN,
+    A3_RISK_BASIS_IS_BALANCE,
+    A4_NO_POST_ENTRY_MODIFICATIONS,
+    BALANCE_MAX_AGE_SECONDS,
+    COMMISSION_PER_LOT_ROUND_TURN,
+    LOT_ROUNDING,
+    MIN_LOT_POLICY,
+    RISK_BASIS,
+    RISK_DEVIATION_TOLERANCE_PCT,
+    RISK_PERCENT,
+)
 from database.sqlite_manager import TradingDatabase
 from engine.models import Candle, Direction, TradeSignal
 from engine.rule_engine import RuleEngine
@@ -89,6 +115,7 @@ class BridgeOrderRecord:
     fill_price: Optional[Decimal] = None
     confirmed_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
+    r8_record: Optional[Dict[str, Any]] = None
 
 
 class BridgeExecutor:
@@ -111,6 +138,12 @@ class BridgeExecutor:
         exchange_rates: Optional[Dict[str, Decimal]] = None,
         on_signal_callback: Optional[Callable[[TradeSignal], None]] = None,
         on_order_callback: Optional[Callable[[BridgeOrderRecord], None]] = None,
+        risk_percent: Decimal = Decimal(str(RISK_PERCENT)),
+        commission_per_lot_round_turn: Decimal = Decimal(str(COMMISSION_PER_LOT_ROUND_TURN)),
+        balance_max_age_seconds: float = BALANCE_MAX_AGE_SECONDS,
+        risk_deviation_tolerance_pct: float = RISK_DEVIATION_TOLERANCE_PCT,
+        allow_post_entry_modifications: bool = False,
+        exact_risk_sizing: Optional[bool] = None,
     ) -> None:
         self.symbol = symbol.strip().replace("/", "")
         self.dwx_client = dwx_client
@@ -121,9 +154,24 @@ class BridgeExecutor:
         self.confirmation_timeout_sec = confirmation_timeout_sec
         self.exchange_rates = exchange_rates or {}
 
+        # Exact 1% Risk Sizing Config
+        self.risk_percent = risk_percent
+        self.commission_per_lot_round_turn = commission_per_lot_round_turn
+        self.balance_max_age_seconds = balance_max_age_seconds
+        self.risk_deviation_tolerance_pct = risk_deviation_tolerance_pct
+        self.allow_post_entry_modifications = allow_post_entry_modifications
+        self.exact_risk_sizing = (
+            exact_risk_sizing
+            if exact_risk_sizing is not None
+            else self.symbol.upper().startswith("USDCAD")
+        )
+
         # Core Rule Engine (strictly shared between backtester & live bridge)
         self.rule_engine = rule_engine or RuleEngine(swing_lookback=20)
         self.position_sizer = position_sizer or PositionSizer(default_risk_pct=risk_pct)
+        self.min_lot = getattr(self.position_sizer, "min_lot", Decimal("0.01"))
+        self.max_lot = getattr(self.position_sizer, "max_lot", Decimal("50.00"))
+        self.lot_step = getattr(self.position_sizer, "lot_step", Decimal("0.01"))
         self.risk_guardrails = risk_guardrails  # None = guardrails not wired (legacy/test mode)
         self.watchdog = watchdog
         self.db = db
@@ -144,13 +192,19 @@ class BridgeExecutor:
         self._running = False
         self._magic_seq = 0
 
+
     def _manage_active_trades(self, current_bar: Candle) -> None:
-        """Applies Institutional Pillar 5 dynamic trade management to active MT4 positions:
-        - Milestone 1: At +2.0R, bank 70% partial profits via send_close.
-        - Milestone 2: At +2.0R, move SL to breakeven (+0.5 pip buffer) via send_modify.
+        """[R7] No changes after entry.
+        The strategy has no break-even, trailing, partial close or early close.
+        A position ends only by its SL or TP. [A4]
+        If allow_post_entry_modifications is False (default under R7 & A4), this is a no-op.
         """
+        if not self.allow_post_entry_modifications:
+            return
+
         if not self.active_trades:
             return
+
 
         pip_size = PositionSizer.get_pip_size(self.symbol)
         for ticket, trade in list(self.active_trades.items()):
@@ -386,65 +440,185 @@ class BridgeExecutor:
         entry_dec = Decimal(str(round(signal.entry_price, 5)))
         sl_dec = Decimal(str(round(signal.stop_loss, 5)))
         tp_dec = Decimal(str(round(signal.take_profit, 5)))
-        # Dynamic balance synchronization from live MT4 state
-        acc_info = self.dwx_client.read_account_info()
-        if isinstance(acc_info, dict) and "balance" in acc_info:
-            try:
-                live_bal = Decimal(str(acc_info["balance"]))
-                if live_bal > Decimal("0"):
-                    self.balance = live_bal
-            except Exception as e:
-                logger.debug(f"Could not parse live balance from acc_info: {e}")
-
-        # Dynamic lot sizing
-        stop_pips = self.position_sizer.price_diff_to_pips(self.symbol, signal.risk_distance)
-        sizing: SizingResult = self.position_sizer.calculate_lots(
-            account_balance=self.balance,
-            stop_pips=stop_pips,
-            symbol=self.symbol,
-            risk_pct=self.risk_pct,
-            rates=self.exchange_rates,
-            current_price=entry_dec,
-        )
-
-        if not sizing.is_valid:
-            logger.warning(f"Order rejected by position sizer: {sizing.rejection_reason}")
-            if self.db is not None:
+        if not self.exact_risk_sizing:
+            # Legacy sizing path for non-USDCAD symbols / backward compatibility
+            acc_info = self.dwx_client.read_account_info()
+            if isinstance(acc_info, dict) and "balance" in acc_info:
                 try:
-                    self.db.save_signal(
-                        signal=signal,
-                        symbol=self.symbol,
-                        timeframe=self.timeframe,
-                        executed=False,
-                        rejection_reason=f"PositionSizer: {sizing.rejection_reason}",
-                    )
+                    live_bal = Decimal(str(acc_info["balance"]))
+                    if live_bal > Decimal("0"):
+                        self.balance = live_bal
                 except Exception as e:
-                    logger.error(f"Failed to log rejected signal to DB: {e}")
-            record = BridgeOrderRecord(
-                magic=0,
-                signal_id=signal_key,
+                    logger.debug(f"Could not parse live balance from acc_info: {e}")
+
+            stop_pips = self.position_sizer.price_diff_to_pips(self.symbol, signal.risk_distance)
+            sizing: SizingResult = self.position_sizer.calculate_lots(
+                account_balance=self.balance,
+                stop_pips=stop_pips,
                 symbol=self.symbol,
-                direction=signal_dir,
-                lots=Decimal("0.00"),
-                entry_price=entry_dec,
-                sl_price=sl_dec,
-                tp_price=tp_dec,
-                risk_pips=stop_pips,
-                reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
-                dispatched_at=datetime.now(timezone.utc),
-                status="REJECTED",
-                rejection_reason=sizing.rejection_reason,
+                risk_pct=self.risk_pct,
+                rates=self.exchange_rates,
+                current_price=entry_dec,
             )
-            self.order_records.append(record)
-            if self.on_order_callback:
-                self.on_order_callback(record)
-            return record
+
+            if not sizing.is_valid:
+                logger.warning(f"Order rejected by position sizer: {sizing.rejection_reason}")
+                if self.db is not None:
+                    try:
+                        self.db.save_signal(
+                            signal=signal,
+                            symbol=self.symbol,
+                            timeframe=self.timeframe,
+                            executed=False,
+                            rejection_reason=f"PositionSizer: {sizing.rejection_reason}",
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to log rejected signal to DB: {e}")
+                record = BridgeOrderRecord(
+                    magic=0,
+                    signal_id=signal_key,
+                    symbol=self.symbol,
+                    direction=signal_dir,
+                    lots=Decimal("0.00"),
+                    entry_price=entry_dec,
+                    sl_price=sl_dec,
+                    tp_price=tp_dec,
+                    risk_pips=stop_pips,
+                    reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
+                    dispatched_at=datetime.now(timezone.utc),
+                    status="REJECTED",
+                    rejection_reason=sizing.rejection_reason,
+                )
+                self.order_records.append(record)
+                if self.on_order_callback:
+                    self.on_order_callback(record)
+                return record
+
+            lots_sent = sizing.lots
+            final_sl = sl_dec
+            final_tp = tp_dec
+            distance = signal.risk_distance
+            live_quote = entry_dec
+            lots_raw = lots_sent
+            achieved_risk_pct = self.risk_pct * Decimal("100")
+            balance_read = self.balance
+            balance_ts = datetime.now(timezone.utc)
+            tick_size = Decimal("0.00001") if "JPY" not in self.symbol.upper() else Decimal("0.001")
+            tick_value = Decimal("1.00")
+            per_lot_loss = Decimal("0.00")
+            risk_amount = self.balance * self.risk_pct
+        else:
+            # [R1] Read current account balance from MT4 now (not equity, not free margin, not cached).
+            # If it cannot be read, is <= 0, or is older than 5 seconds, send no order.
+            balance_read, balance_ts, bal_err = read_r1_account_balance(
+                self.dwx_client.account_file,
+                max_age_seconds=self.balance_max_age_seconds,
+            )
+            if bal_err is not None:
+                logger.error(f"[R1] Cannot read fresh balance from MT4: {bal_err}. Sending no order.")
+                record = BridgeOrderRecord(
+                    magic=0,
+                    signal_id=signal_key,
+                    symbol=self.symbol,
+                    direction=signal_dir,
+                    lots=Decimal("0.00"),
+                    entry_price=entry_dec,
+                    sl_price=sl_dec,
+                    tp_price=tp_dec,
+                    risk_pips=Decimal("0.0"),
+                    reward_pips=Decimal("0.0"),
+                    dispatched_at=datetime.now(timezone.utc),
+                    status="REJECTED",
+                    rejection_reason=f"R1_BALANCE_REJECTED: {bal_err}",
+                )
+                self.order_records.append(record)
+                if self.on_order_callback:
+                    self.on_order_callback(record)
+                return record
+
+            self.balance = balance_read
+
+            # [R2] Risk amount = balance * 1.0 / 100
+            risk_amount = calculate_r2_risk_amount(balance_read, self.risk_percent)
+
+            # [R3] Price used for sizing: live quote at moment of sending (Ask for BUY, Bid for SELL).
+            # distance = |quote - SL|. Spread is inherent in live quote.
+            live_quote: Optional[Decimal] = None
+            quotes = self.dwx_client.read_market_quote(self.symbol)
+            if quotes is not None:
+                bid, ask = quotes
+                live_quote = ask if signal_dir == Direction.BUY else bid
+            if live_quote is None:
+                live_quote = entry_dec
+
+            _quote_dec, distance = calculate_r3_quote_distance(live_quote, sl_dec)
+
+            # [R4] Tick size, tick value, and per-lot loss at the stop
+            # per_lot_loss = (distance / tick_size) * tick_value + COMMISSION_PER_LOT_ROUND_TURN ($7.00/lot)
+            tick_size = Decimal("0.00001") if "JPY" not in self.symbol.upper() else Decimal("0.001")
+            tick_value = get_r4_tick_value(
+                symbol=self.symbol,
+                current_price=live_quote,
+                contract_size=Decimal("100000"),
+                tick_size=tick_size,
+            )
+            per_lot_loss = calculate_r4_per_lot_loss(
+                distance=distance,
+                tick_size=tick_size,
+                tick_value=tick_value,
+                commission_per_lot=self.commission_per_lot_round_turn,
+            )
+
+            # [R5] lots_raw = risk_amount / per_lot_loss. Round down to lot_step, never round() or ceil.
+            # If below min_lot, skip trade and log MIN_LOT_EXCEEDS_RISK.
+            lots_sent, lots_raw, achieved_risk_pct, r5_status = calculate_r5_lot_size(
+                risk_amount=risk_amount,
+                per_lot_loss=per_lot_loss,
+                lot_step=self.lot_step,
+                min_lot=self.min_lot,
+                max_lot=self.max_lot,
+                balance=balance_read,
+            )
+
+            if r5_status == "MIN_LOT_EXCEEDS_RISK":
+                logger.warning(
+                    f"[R5] MIN_LOT_EXCEEDS_RISK: lots_raw {lots_raw} is below min_lot {self.min_lot}. "
+                    f"Skipping trade without raising lot size."
+                )
+                record = BridgeOrderRecord(
+                    magic=0,
+                    signal_id=signal_key,
+                    symbol=self.symbol,
+                    direction=signal_dir,
+                    lots=Decimal("0.00"),
+                    entry_price=entry_dec,
+                    sl_price=sl_dec,
+                    tp_price=tp_dec,
+                    risk_pips=self.position_sizer.price_diff_to_pips(self.symbol, distance),
+                    reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
+                    dispatched_at=datetime.now(timezone.utc),
+                    status="REJECTED",
+                    rejection_reason="MIN_LOT_EXCEEDS_RISK",
+                )
+                self.order_records.append(record)
+                if self.on_order_callback:
+                    self.on_order_callback(record)
+                return record
+            elif r5_status == "MAX_LOT_CAPPED":
+                logger.info(f"[R5] Lots capped at max_lot {self.max_lot} (raw: {lots_raw})")
+
+            # [R6] Send once, complete. Market order with SL and TP attached in the same request.
+            # Prices rounded to symbol digits. TP follows strategy (or 10x SL distance).
+            _q_final, final_sl, final_tp = prepare_r6_order_prices(
+                quote=live_quote,
+                sl=sl_dec,
+                direction=signal_dir,
+                digits=5 if "JPY" not in self.symbol.upper() else 3,
+                strategy_tp=tp_dec,
+            )
 
         # ── Non-Bypassable Risk Guardrail Gate ──────────────────────────
-        # If RiskGuardrails are wired, this is the MANDATORY checkpoint.
-        # A rejected trade NEVER reaches DWX dispatch.
         if self.risk_guardrails is not None:
-            # Sync active trades with live MT4 account state if available
             acc_info = self.dwx_client.read_account_info()
             if acc_info and "orders" in acc_info:
                 live_tickets = {int(o["ticket"]) for o in acc_info["orders"] if "ticket" in o}
@@ -460,17 +634,17 @@ class BridgeExecutor:
             account_state = AccountState(
                 starting_daily_balance=self.balance,
                 current_balance=self.balance,
-                current_equity=self.balance,  # updated by live feed in production
+                current_equity=self.balance,
                 realized_daily_pnl=Decimal("0.00"),
                 unrealized_daily_pnl=Decimal("0.00"),
                 open_trade_count=open_count,
                 daily_trades_count=len([r for r in self.order_records if r.status in ("FILLED", "UNCONFIRMED")]),
-                current_spread_pips=Decimal("0.0"),  # populated by live feed in production
+                current_spread_pips=Decimal("0.0"),
                 timestamp=signal_time,
             )
             risk_result: ValidationResult = self.risk_guardrails.validate_trade(
                 account_state=account_state,
-                proposed_lots=sizing.lots,
+                proposed_lots=lots_sent,
                 trade_time=signal_time,
             )
             if not risk_result.is_allowed:
@@ -496,11 +670,11 @@ class BridgeExecutor:
                     signal_id=signal_key,
                     symbol=self.symbol,
                     direction=signal_dir,
-                    lots=sizing.lots,
+                    lots=lots_sent,
                     entry_price=entry_dec,
                     sl_price=sl_dec,
                     tp_price=tp_dec,
-                    risk_pips=stop_pips,
+                    risk_pips=self.position_sizer.price_diff_to_pips(self.symbol, distance),
                     reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
                     dispatched_at=datetime.now(timezone.utc),
                     status="REJECTED",
@@ -530,26 +704,29 @@ class BridgeExecutor:
                     magic_number=magic,
                     symbol=self.symbol,
                     direction=signal_dir.value,
-                    lots=float(sizing.lots),
+                    lots=float(lots_sent),
                     target_entry=float(entry_dec),
-                    stop_loss=float(sl_dec),
-                    take_profit=float(tp_dec),
+                    stop_loss=float(final_sl),
+                    take_profit=float(final_tp),
                     status="SUBMITTED",
                 )
             except Exception as e:
                 logger.error(f"Failed to save signal/order to DB: {e}")
+
+        stop_pips = self.position_sizer.price_diff_to_pips(self.symbol, distance)
+        reward_pips = self.position_sizer.price_diff_to_pips(self.symbol, abs(final_tp - live_quote))
 
         record = BridgeOrderRecord(
             magic=magic,
             signal_id=signal_key,
             symbol=self.symbol,
             direction=signal_dir,
-            lots=sizing.lots,
+            lots=lots_sent,
             entry_price=entry_dec,
-            sl_price=sl_dec,
-            tp_price=tp_dec,
+            sl_price=final_sl,
+            tp_price=final_tp,
             risk_pips=stop_pips,
-            reward_pips=self.position_sizer.price_diff_to_pips(self.symbol, signal.reward_distance),
+            reward_pips=reward_pips,
             dispatched_at=datetime.now(timezone.utc),
             status="PENDING",
         )
@@ -560,9 +737,9 @@ class BridgeExecutor:
             self.dwx_client.send_order(
                 symbol=self.symbol,
                 order_type=order_type,
-                lots=sizing.lots,
-                sl=sl_dec,
-                tp=tp_dec,
+                lots=lots_sent,
+                sl=final_sl,
+                tp=final_tp,
                 magic=magic,
                 comment="akstack_10R",
             )
@@ -593,29 +770,35 @@ class BridgeExecutor:
             timeout_sec=self.confirmation_timeout_sec,
         )
 
+        actual_fill_price: Optional[Decimal] = None
+        ticket_val: Optional[int] = None
+
         if report is not None:
             if report.status in ("FILLED", "OPEN"):
                 record.status = "FILLED"
                 record.ticket = report.ticket
                 record.fill_price = report.open_price
                 record.confirmed_at = report.timestamp
+                actual_fill_price = report.open_price
+                ticket_val = report.ticket
                 logger.info(f"Order FILLED: Ticket {record.ticket} at {record.fill_price}")
+
                 if report.ticket is not None:
-                    p_pct = Decimal(str(signal.partial_bank_pct)) if (signal.partial_bank_pct is not None) else Decimal("0.0")
-                    be_r = Decimal(str(signal.breakeven_trigger_r)) if (signal.breakeven_trigger_r is not None) else Decimal("2.0")
+                    # [R7] Record active trade, but modifications are forbidden by default
                     self.active_trades[report.ticket] = ActiveBridgeTrade(
                         ticket=report.ticket,
                         magic=magic,
                         symbol=self.symbol,
                         direction=signal_dir,
                         entry_price=report.open_price,
-                        sl_price=sl_dec,
-                        tp_price=tp_dec,
-                        lots=sizing.lots,
+                        sl_price=final_sl,
+                        tp_price=final_tp,
+                        lots=lots_sent,
                         risk_pips=stop_pips,
-                        partial_bank_pct=p_pct,
-                        breakeven_trigger_r=be_r,
+                        partial_bank_pct=Decimal("0.0"),
+                        breakeven_trigger_r=Decimal("0.0"),
                     )
+
                 if self.db is not None and record.ticket is not None:
                     try:
                         slippage = float(abs(report.open_price - entry_dec) / Decimal("0.0001"))
@@ -671,6 +854,64 @@ class BridgeExecutor:
                     )
                 except Exception as e:
                     logger.error(f"Failed to record unconfirmed in DB: {e}")
+
+        # [R8] Comprehensive Order & Risk Audit Logging
+        if self.exact_risk_sizing:
+            expected_loss_sl = (per_lot_loss * lots_sent).quantize(Decimal("0.01"))
+            reward_dist = abs(final_tp - live_quote)
+            profit_per_lot_tp = (reward_dist / tick_size) * tick_value - self.commission_per_lot_round_turn
+            expected_profit_tp = (profit_per_lot_tp * lots_sent).quantize(Decimal("0.01"))
+            price_rr = (reward_dist / distance).quantize(Decimal("0.01")) if distance > Decimal("0") else Decimal("0.00")
+            net_dollar_rr = (expected_profit_tp / expected_loss_sl).quantize(Decimal("0.01")) if expected_loss_sl > Decimal("0") else Decimal("0.00")
+
+            realized_risk_pct = None
+            dev_pct = None
+            dev_flag = False
+            dev_cause = None
+
+            if actual_fill_price is not None:
+                realized_risk_pct, dev_pct, dev_flag, dev_cause = calculate_r8_realized_risk(
+                    balance=balance_read,
+                    fill_price=actual_fill_price,
+                    sl=final_sl,
+                    direction=signal.direction,
+                    lots_sent=lots_sent,
+                    tick_size=tick_size,
+                    tick_value=tick_value,
+                    commission_rate=self.commission_per_lot_round_turn,
+                    planned_risk_pct=achieved_risk_pct if achieved_risk_pct > Decimal("0") else self.risk_percent,
+                    tolerance_pct=self.risk_deviation_tolerance_pct,
+                    quote=live_quote,
+                )
+                if dev_flag:
+                    logger.warning(
+                        f"[R8 RISK_DEVIATION] Realized risk {realized_risk_pct}% deviated by {dev_pct}% "
+                        f"from planned {self.risk_percent}% (> {self.risk_deviation_tolerance_pct}%). Cause: {dev_cause}"
+                    )
+
+            r8_record = format_r8_order_record(
+                balance=balance_read,
+                balance_timestamp=balance_ts,
+                risk_amount=risk_amount,
+                quote=live_quote,
+                sl=final_sl,
+                tp=final_tp,
+                distance=distance,
+                tick_size=tick_size,
+                tick_value=tick_value,
+                commission_rate=self.commission_per_lot_round_turn,
+                lots_raw=lots_raw,
+                lots_sent=lots_sent,
+                expected_loss_sl=expected_loss_sl,
+                expected_profit_tp=expected_profit_tp,
+                price_rr=price_rr,
+                net_dollar_rr=net_dollar_rr,
+                ticket=ticket_val,
+                actual_fill_price=actual_fill_price,
+                realized_risk_pct=realized_risk_pct,
+                risk_deviation=dev_cause,
+            )
+            record.r8_record = r8_record
 
         if self.on_order_callback:
             self.on_order_callback(record)
