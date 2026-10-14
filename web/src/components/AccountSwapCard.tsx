@@ -124,7 +124,7 @@ export const AccountSwapCard: React.FC<AccountSwapCardProps> = ({
           {onOpenAddAccount && (
             <button
               onClick={onOpenAddAccount}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-accent-lime hover:text-black transition-all cursor-pointer active:scale-95"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-accent-lime hover:text-black transition-colors cursor-pointer active:scale-[0.97]"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Account</span>
@@ -141,7 +141,7 @@ export const AccountSwapCard: React.FC<AccountSwapCardProps> = ({
                 <div
                   key={acc.id}
                   onClick={() => onSelectAccount && onSelectAccount(acc)}
-                  className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                  className={`p-3 rounded-2xl border transition-colors active:scale-[0.98] cursor-pointer flex items-center justify-between ${
                     isActive
                       ? 'bg-window-card-inset border-accent-lime-40 shadow-sm'
                       : 'bg-black/20 border-white/5 hover:bg-white/5 hover:border-white/10'
@@ -187,7 +187,7 @@ export const AccountSwapCard: React.FC<AccountSwapCardProps> = ({
                           e.stopPropagation();
                           onDeleteAccount(acc.id);
                         }}
-                        className="text-slate-500 hover:text-rose-400 p-1 transition-colors"
+                        className="text-slate-500 hover:text-rose-400 p-1 transition-colors active:scale-[0.97]"
                         title="Remove Account"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

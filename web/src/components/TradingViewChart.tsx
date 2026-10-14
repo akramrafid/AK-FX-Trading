@@ -286,7 +286,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             <div
               key={ticker.id}
               onClick={() => handleTickerSelect(ticker.id)}
-              className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+              className={`p-3.5 rounded-2xl border transition-colors active:scale-[0.98] cursor-pointer flex items-center justify-between ${
                 isSelected
                   ? 'bg-window-card-inset border-accent-lime-40 shadow-sm'
                   : 'bg-black/20 border-white/5 hover:bg-white/5 hover:border-white/10'
@@ -329,7 +329,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               <button
                 key={tf}
                 onClick={() => handleTfClick(tf)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-xl text-xs font-bold font-mono transition-colors active:scale-[0.97] cursor-pointer ${
                   activeTf === tf
                     ? 'bg-accent-lime text-black shadow-sm font-black'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -346,7 +346,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div className="flex items-center gap-2 text-xs font-medium">
             <button
               onClick={() => setChartMode('TradingView')}
-              className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer active:scale-[0.97] ${
                 chartMode === 'TradingView'
                   ? 'bg-white/10 text-white font-bold'
                   : 'text-slate-400 hover:text-white'
@@ -356,7 +356,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             </button>
             <button
               onClick={() => setChartMode('Depth')}
-              className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer active:scale-[0.97] ${
                 chartMode === 'Depth'
                   ? 'bg-white/10 text-white font-bold'
                   : 'text-slate-400 hover:text-white'
@@ -371,7 +371,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         <div className="flex items-center gap-2 text-slate-400">
           <button
             onClick={() => setShowIndicators(!showIndicators)}
-            className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+            className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer active:scale-[0.97] ${
               showIndicators ? 'bg-accent-lime-15 text-accent-lime border-accent-lime-40' : 'bg-white/5 border-white/10 hover:text-white'
             }`}
             title="Toggle Indicators (SMA 20 & EMA 50)"
@@ -381,7 +381,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           </button>
           <button
             onClick={() => chartRef.current?.timeScale().fitContent()}
-            className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer active:scale-[0.97]"
             title="Reset Zoom / Fit Content"
           >
             <Maximize2 className="w-3.5 h-3.5" />

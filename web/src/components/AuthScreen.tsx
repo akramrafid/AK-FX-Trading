@@ -123,7 +123,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ak@gmail.com"
                 required
-                className="w-full bg-black/50 border border-white/15 focus:border-accent-lime focus:ring-1 focus:ring-accent-lime rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 font-mono transition-all outline-none"
+                className="w-full bg-black/50 border border-white/15 focus:border-accent-lime focus:ring-1 focus:ring-accent-lime rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 font-mono transition-colors outline-none"
               />
             </div>
           </div>
@@ -143,12 +143,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
                 required
-                className="w-full bg-black/50 border border-white/15 focus:border-accent-lime focus:ring-1 focus:ring-accent-lime rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-500 font-mono transition-all outline-none"
+                className="w-full bg-black/50 border border-white/15 focus:border-accent-lime focus:ring-1 focus:ring-accent-lime rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-500 font-mono transition-colors outline-none"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 text-slate-400 hover:text-slate-200 transition-colors p-1"
+                className="absolute right-3 text-slate-400 hover:text-slate-200 transition-colors p-1 cursor-pointer active:scale-[0.97]"
                 title={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -171,7 +171,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
             <button
               type="button"
               onClick={handleQuickDemo}
-              className="inline-flex items-center gap-1 text-[11px] text-accent-lime hover:underline"
+              className="inline-flex items-center gap-1 text-[11px] text-accent-lime hover:underline cursor-pointer active:scale-[0.97]"
             >
               <Sparkles className="w-3 h-3" />
               <span>Fill Demo</span>
@@ -182,7 +182,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full mt-2 py-3 px-4 rounded-xl bg-accent-lime hover:bg-lime-300 active:scale-[0.99] text-black font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-lime-900/20 transition-all cursor-pointer disabled:opacity-70"
+            className="w-full mt-2 py-3 px-4 rounded-xl bg-accent-lime hover:bg-lime-300 active:scale-[0.97] text-black font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-lime-900/20 transition-colors cursor-pointer disabled:opacity-70"
           >
             {isLoading ? (
               <span>Authenticating...</span>

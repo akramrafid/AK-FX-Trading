@@ -185,7 +185,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 key={item.label}
                 onClick={() => handleTabClick(item.label)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors active:scale-[0.97] cursor-pointer ${
                   isActive
                     ? 'bg-white/10 text-white border border-white/15 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
@@ -204,7 +204,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative" ref={accountMenuRef}>
             <button
               onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/10 text-xs font-medium text-slate-200 shadow-sm cursor-pointer hover:border-white/20 transition-all"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/10 text-xs font-medium text-slate-200 shadow-sm cursor-pointer hover:border-white/20 transition-colors active:scale-[0.97]"
               title="Switch or Add Trading Accounts"
             >
               <span className="w-2.5 h-2.5 rounded-full bg-accent-green flex items-center justify-center">
@@ -214,9 +214,9 @@ export const Header: React.FC<HeaderProps> = ({
               <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isAccountMenuOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Floating Multi-Account Dropdown */}
+            {/* Floating Multi-Account Dropdown (Origin-Aware) */}
             {isAccountMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-900/95 border border-white/10 shadow-2xl p-2 z-50 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-900/95 border border-white/10 shadow-2xl p-2 z-50 backdrop-blur-xl dropdown-origin-top-right">
                 <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-300">Switch Account</span>
                   <span className="text-[10px] font-mono text-slate-500">
@@ -235,7 +235,7 @@ export const Header: React.FC<HeaderProps> = ({
                             if (onSelectAccount) onSelectAccount(acc);
                             setIsAccountMenuOpen(false);
                           }}
-                          className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between transition-all cursor-pointer ${
+                          className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between transition-colors cursor-pointer active:scale-[0.97] ${
                             isActive
                               ? 'bg-white/10 border border-accent-lime-40 text-white'
                               : 'hover:bg-white/5 border border-transparent text-slate-300'
@@ -276,7 +276,7 @@ export const Header: React.FC<HeaderProps> = ({
                       setIsAccountMenuOpen(false);
                       onOpenConnectAccount();
                     }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-accent-lime hover:text-black transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-accent-lime hover:text-black transition-colors cursor-pointer active:scale-[0.97]"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add New MT4 Account</span>
@@ -318,7 +318,7 @@ export const Header: React.FC<HeaderProps> = ({
           {status.bridge_running ? (
             <button
               onClick={onStopBridge}
-              className="px-2.5 py-1 rounded-full bg-accent-red-15 border border-accent-red-40 text-accent-red text-xs font-bold hover:bg-rose-950/40 transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-1 rounded-full bg-accent-red-15 border border-accent-red-40 text-accent-red text-xs font-bold hover:bg-rose-950/40 transition-colors flex items-center gap-1.5 cursor-pointer active:scale-[0.97]"
               title="Stop Bridge Execution"
             >
               <Square className="w-2.5 h-2.5 fill-current" />
@@ -327,7 +327,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               onClick={onStartBridge}
-              className="px-2.5 py-1 rounded-full bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-lime-950/40 transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-1 rounded-full bg-accent-lime-15 border border-accent-lime-40 text-accent-lime text-xs font-bold hover:bg-lime-950/40 transition-colors flex items-center gap-1.5 cursor-pointer active:scale-[0.97]"
               title="Start Bridge Execution"
             >
               <Play className="w-2.5 h-2.5 fill-current" />

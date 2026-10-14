@@ -52,7 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="glass-panel w-full max-w-2xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="glass-panel modal-surface-enter w-full max-w-2xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-dark-card">
           <div className="flex items-center gap-2.5">
@@ -66,7 +66,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer active:scale-[0.97]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -83,7 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleChange('STRATEGY_MODE', 'c1_wickswap')}
-                className={`p-3 rounded-xl border text-left transition-all ${
+                className={`p-3 rounded-xl border text-left transition-colors cursor-pointer active:scale-[0.98] ${
                   (formData['STRATEGY_MODE'] || 'c1_wickswap') === 'c1_wickswap'
                     ? 'border-accent-lime bg-accent-lime-10 text-white shadow-sm'
                     : 'border-white/10 bg-black/30 text-slate-400 hover:border-white/20'
@@ -96,7 +96,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleChange('STRATEGY_MODE', 'institutional')}
-                className={`p-3 rounded-xl border text-left transition-all ${
+                className={`p-3 rounded-xl border text-left transition-colors cursor-pointer active:scale-[0.98] ${
                   formData['STRATEGY_MODE'] === 'institutional'
                     ? 'border-accent-cyan bg-accent-cyan-15 text-white shadow-sm'
                     : 'border-white/10 bg-black/30 text-slate-400 hover:border-white/20'
@@ -241,14 +241,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white transition-colors"
+              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer active:scale-[0.97]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent-lime hover:bg-accent-lime/90 text-black text-xs font-black transition-all shadow-lg active:scale-95 disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent-lime hover:bg-accent-lime/90 text-black text-xs font-black transition-colors shadow-lg active:scale-[0.97] disabled:opacity-50 cursor-pointer"
             >
               <Save className="w-4 h-4" />
               {isSaving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save Configuration'}

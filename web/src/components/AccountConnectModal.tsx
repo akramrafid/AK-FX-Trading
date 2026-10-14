@@ -225,7 +225,7 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="glass-panel w-full max-w-lg rounded-2xl border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="glass-panel modal-surface-enter w-full max-w-lg rounded-2xl border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-dark-card shrink-0">
           <div className="flex items-center gap-2.5">
@@ -239,7 +239,7 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer active:scale-[0.97]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -277,7 +277,7 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
                   key={preset}
                   type="button"
                   onClick={() => handlePresetSelect(preset)}
-                  className="py-1 px-1.5 rounded-lg text-[11px] font-medium border text-center transition-all bg-black/30 border-white/10 text-slate-300 hover:text-accent-lime hover:border-accent-lime-40"
+                  className="py-1 px-1.5 rounded-lg text-[11px] font-medium border text-center transition-colors cursor-pointer active:scale-[0.97] bg-black/30 border-white/10 text-slate-300 hover:text-accent-lime hover:border-accent-lime-40"
                 >
                   {preset}
                 </button>
@@ -448,14 +448,14 @@ export const AccountConnectModal: React.FC<AccountModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white transition-colors cursor-pointer active:scale-[0.97]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isConnecting}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent-lime hover:bg-lime-300 text-black text-xs font-black transition-all shadow-lg active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-accent-lime hover:bg-lime-300 text-black text-xs font-black transition-colors shadow-lg active:scale-[0.97] disabled:opacity-50 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               {isConnecting ? 'Adding Account...' : (isActive ? 'Add & Activate Account' : 'Add Account')}

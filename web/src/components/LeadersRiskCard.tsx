@@ -42,14 +42,14 @@ export const LeadersRiskCard: React.FC<LeadersRiskCardProps> = ({
         <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
           <button
             onClick={() => setPeriod('TODAY')}
-            className={`transition-colors cursor-pointer ${period === 'TODAY' ? 'text-white font-bold' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`transition-colors cursor-pointer active:scale-[0.97] ${period === 'TODAY' ? 'text-white font-bold' : 'text-slate-500 hover:text-slate-300'}`}
           >
             TODAY
           </button>
           <span className="text-slate-600">/</span>
           <button
             onClick={() => setPeriod('WEEK')}
-            className={`transition-colors cursor-pointer ${period === 'WEEK' ? 'text-white font-bold' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`transition-colors cursor-pointer active:scale-[0.97] ${period === 'WEEK' ? 'text-white font-bold' : 'text-slate-500 hover:text-slate-300'}`}
           >
             WEEK
           </button>

@@ -36,6 +36,11 @@
     /* Chart Palette */
     --chart-candle-bullish: #6366f1;
     --chart-candle-bearish: #ef4444;
+
+    /* Emil Kowalski Craft Tokens: Strong Custom Easings */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   }
 
   body {
@@ -210,5 +215,85 @@
 
 .animate-ak-circuit {
   animation: ak-circuit-pulse 3s ease-in-out infinite;
+}
+
+/* =========================================================================
+   Emil Kowalski Design Engineering Polish & Motion Standards
+   ========================================================================= */
+
+/* 1. Tactile Button Feedback */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+.btn-interactive {
+  transition: transform 160ms var(--ease-out), background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]),
+.btn-interactive:active {
+  transform: scale(0.97);
+}
+
+/* 2. Modals: Origin Center, Start from scale(0.95), Opacity 0 */
+.modal-surface-enter {
+  transform-origin: center;
+  animation: modal-enter 200ms var(--ease-out) forwards;
+}
+
+@keyframes modal-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 3. Dropdowns & Popovers: Origin-Aware Scaling from Trigger */
+.dropdown-origin-top-right {
+  transform-origin: top right;
+  animation: dropdown-enter 160ms var(--ease-out) forwards;
+}
+
+.dropdown-origin-top-left {
+  transform-origin: top left;
+  animation: dropdown-enter 160ms var(--ease-out) forwards;
+}
+
+@keyframes dropdown-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 4. Touch Device Hover State Isolation */
+@media (hover: hover) and (pointer: fine) {
+  .hover-lift:hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* 5. Accessibility: Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:active:not(:disabled),
+  [role="button"]:active:not([aria-disabled="true"]),
+  .btn-interactive:active {
+    transform: none !important;
+  }
 }
 

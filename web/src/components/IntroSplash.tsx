@@ -128,7 +128,7 @@ export const IntroSplash: React.FC<IntroSplashProps> = ({ onComplete }) => {
         {/* Fast Bypass Button */}
         <button
           onClick={onComplete}
-          className="mt-6 flex items-center gap-1 text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+          className="mt-6 flex items-center gap-1 text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer active:scale-[0.97]"
         >
           <span>Continue to Login</span>
           <ChevronRight className="w-3.5 h-3.5" />
