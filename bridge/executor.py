@@ -1091,6 +1091,11 @@ def main() -> None:
             initial_balance=live_bal,
             risk_pct=cfg.risk_pct,
             confirmation_timeout_sec=cfg.confirmation_timeout_sec,
+            balance_max_age_seconds=getattr(cfg, "balance_max_age_seconds", BALANCE_MAX_AGE_SECONDS),
+            risk_percent=Decimal(str(getattr(cfg, "risk_percent", RISK_PERCENT))),
+            commission_per_lot_round_turn=Decimal(str(getattr(cfg, "commission_per_lot_round_turn", COMMISSION_PER_LOT_ROUND_TURN))),
+            risk_deviation_tolerance_pct=getattr(cfg, "risk_deviation_tolerance_pct", RISK_DEVIATION_TOLERANCE_PCT),
+            allow_post_entry_modifications=getattr(cfg, "allow_post_entry_modifications", False),
         )
         bridges.append(b)
 

@@ -330,6 +330,16 @@ class TestExactRiskSizing(unittest.TestCase):
         self.assertEqual(rec_invalid.status, "REJECTED")
         self.assertIn("BALANCE_UNREADABLE", rec_invalid.rejection_reason)
 
+        # Case D: Live file fresh on disk (file_mtime ~0s), but broker tick timestamp in JSON is 18s old
+        tick_paused_time = now - timedelta(seconds=18)
+        self.client.write_mock_account(balance=10000.00, equity=10000.00, timestamp=tick_paused_time)
+        import os
+        os.utime(self.client.account_file, (now.timestamp(), now.timestamp()))
+        bal, dt, err = read_r1_account_balance(self.client.account_file, max_age_seconds=5.0)
+        self.assertIsNone(err)
+        self.assertEqual(bal, Decimal("10000.00"))
+        self.assertIsNotNone(dt)
+
     # -------------------------------------------------------------------------
     # Test 7: Order Shape
     # -------------------------------------------------------------------------

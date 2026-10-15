@@ -87,7 +87,7 @@ def read_r1_account_balance(
             return None, None, f"BALANCE_UNREADABLE: {e}"
     elif isinstance(source, dict):
         acc_data = source
-        file_mtime = float(acc_data.get("_mtime", now_ts))
+        file_mtime = float(acc_data["_mtime"]) if "_mtime" in acc_data else None
     else:
         return None, None, f"BALANCE_UNREADABLE: unsupported source type {type(source)}"
 
@@ -109,12 +109,13 @@ def read_r1_account_balance(
     # Check timestamp freshness (<= max_age_seconds)
     record_dt: Optional[datetime] = None
     age_seconds: float = 0.0
+    ts_age: Optional[float] = None
     if "timestamp" in acc_data:
         ts_val = acc_data["timestamp"]
         try:
             if isinstance(ts_val, (int, float)):
                 record_dt = datetime.fromtimestamp(ts_val, tz=timezone.utc)
-                age_seconds = now_ts - float(ts_val)
+                ts_age = max(0.0, now_ts - float(ts_val))
             else:
                 try:
                     record_dt = datetime.fromisoformat(str(ts_val))
@@ -123,17 +124,27 @@ def read_r1_account_balance(
                     record_dt = datetime.strptime(clean_ts[:19], "%Y-%m-%d %H:%M:%S")
                 if record_dt.tzinfo is None:
                     record_dt = record_dt.replace(tzinfo=timezone.utc)
-                age_seconds = now_ts - record_dt.timestamp()
+                ts_age = max(0.0, now_ts - record_dt.timestamp())
         except Exception:
-            if file_mtime is not None:
-                age_seconds = now_ts - file_mtime
+            pass
+
+    if file_mtime is not None:
+        file_age = max(0.0, now_ts - file_mtime)
+        if file_age <= max_age_seconds:
+            # File was written by MT4 within max_age_seconds limit.
+            # In MT4 DWX, OnTimer updates the file every second while TimeCurrent() in the
+            # JSON payload only updates on market ticks or may have broker clock offset.
+            # Fresh file_mtime guarantees MT4 is alive and actively exporting live balance.
+            age_seconds = file_age
+            if record_dt is None or abs(now_ts - record_dt.timestamp()) > max_age_seconds:
                 record_dt = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
-            else:
-                age_seconds = 0.0
-                record_dt = datetime.now(timezone.utc)
-    elif file_mtime is not None:
-        age_seconds = now_ts - file_mtime
-        record_dt = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
+        else:
+            # File has not been written within max_age_seconds (MT4 is dead, crashed, or not writing)
+            age_seconds = max(file_age, ts_age if ts_age is not None else file_age)
+    elif ts_age is not None:
+        age_seconds = ts_age
+    elif record_dt is not None:
+        age_seconds = max(0.0, now_ts - record_dt.timestamp())
     else:
         age_seconds = 0.0
         record_dt = datetime.now(timezone.utc)
