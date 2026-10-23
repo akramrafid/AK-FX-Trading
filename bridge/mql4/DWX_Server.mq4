@@ -20,6 +20,9 @@ input string   AccountFilename   = "DWX_Account.txt";  // Account info file name
 static datetime g_lastBarTime = 0;
 static string   g_symbolBarsFile = "";
 static ulong    g_lastAccountExportMs = 0;
+static string   g_commandsFile = "DWX_Commands.txt";
+static string   g_reportsFile  = "DWX_Reports.txt";
+static string   g_accountFile  = "DWX_Account.txt";
 
 // Forward declaration
 void ExportAccountInfo();
@@ -33,11 +36,15 @@ int OnInit()
    g_lastBarTime = Time[0];
    g_symbolBarsFile = "DWX_Bars_" + Symbol() + "_M" + IntegerToString(Period()) + ".txt";
 
+   g_commandsFile = (CommandsFilename != "") ? CommandsFilename : "DWX_Commands.txt";
+   g_reportsFile  = (ReportsFilename != "")  ? ReportsFilename  : "DWX_Reports.txt";
+   g_accountFile  = (AccountFilename != "")  ? AccountFilename  : "DWX_Account.txt";
+
    Print("[DWX_AutoTrader] Initializing bridge on ", Symbol(), " M", Period());
    Print("[DWX_AutoTrader] Bars export file: ", g_symbolBarsFile);
-   Print("[DWX_AutoTrader] Commands file:    ", CommandsFilename);
-   Print("[DWX_AutoTrader] Reports file:     ", ReportsFilename);
-   Print("[DWX_AutoTrader] Account file:     ", AccountFilename);
+   Print("[DWX_AutoTrader] Commands file:    ", g_commandsFile);
+   Print("[DWX_AutoTrader] Reports file:     ", g_reportsFile);
+   Print("[DWX_AutoTrader] Account file:     ", g_accountFile);
 
    // Ensure required charts are active in terminal for multi-timeframe streaming
    EnsureChartIsOpen(Symbol(), PERIOD_M1);
@@ -179,10 +186,10 @@ void ExportRecentBars(int count)
 //+------------------------------------------------------------------+
 void ProcessPendingCommands()
 {
-   if (!FileIsExist(CommandsFilename))
+   if (!FileIsExist(g_commandsFile))
       return;
 
-   int fileHandle = FileOpen(CommandsFilename, FILE_READ|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int fileHandle = FileOpen(g_commandsFile, FILE_READ|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if (fileHandle == INVALID_HANDLE)
       return;
 
@@ -207,7 +214,7 @@ void ProcessPendingCommands()
       return;
 
    // Truncate commands file immediately so commands are not re-executed
-   int clearHandle = FileOpen(CommandsFilename, FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int clearHandle = FileOpen(g_commandsFile, FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if (clearHandle != INVALID_HANDLE)
    {
       FileWriteString(clearHandle, "");
@@ -344,7 +351,7 @@ void ExecuteSingleCommand(string jsonStr)
 //+------------------------------------------------------------------+
 void WriteReport(int ticket, int magic, string sym, string orderType, double lots, double openPrice, double sl, double tp, string status, int errCode, string msg)
 {
-   int fileHandle = FileOpen(ReportsFilename, FILE_READ|FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int fileHandle = FileOpen(g_reportsFile, FILE_READ|FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if (fileHandle == INVALID_HANDLE)
    {
       Print("[DWX_AutoTrader] Error opening reports file: ", GetLastError());
@@ -401,7 +408,7 @@ int GetJsonInt(string json, string key)
 //+------------------------------------------------------------------+
 void ExportAccountInfo()
 {
-   int fileHandle = FileOpen(AccountFilename, FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int fileHandle = FileOpen(g_accountFile, FILE_WRITE|FILE_TXT|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if (fileHandle == INVALID_HANDLE)
    {
       return;
