@@ -29,6 +29,14 @@ from engine.models import Candle
 logger = logging.getLogger("dwx_client")
 
 
+def _same_symbol(a: str, b: str) -> bool:
+    """USDCAD and USDCADm (the Exness account suffix) name the same instrument."""
+    def norm(s: str) -> str:
+        s = s.strip().replace("/", "").upper()
+        return s[:-1] if len(s) > 6 and s.endswith("M") else s
+    return bool(a.strip()) and norm(a) == norm(b)
+
+
 class OrderType(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -229,6 +237,36 @@ class DWXClient:
                     if bid > Decimal("0") and ask > Decimal("0"):
                         return (bid, ask)
 
+        return None
+
+    def read_account_quote(self, symbol: str, max_age_seconds: float) -> Optional[Tuple[Decimal, Decimal]]:
+        """Live (bid, ask) for symbol in the format the MT4 EA writes to DWX_Account.txt.
+
+        DWX_Server.mq4 puts the chart symbol's quote at the top level ("symbol", "bid", "ask") and the
+        tracked pairs under "pairs" (keys carry the "m" suffix). The EA rewrites the file every second,
+        so a file older than max_age_seconds means no live quote. Returns None when there is none.
+        """
+        f = self.account_file
+        try:
+            if not f.exists() or time.time() - f.stat().st_mtime > max_age_seconds:
+                return None
+        except OSError:
+            return None
+        acc = self.read_account_info()
+        if not isinstance(acc, dict):
+            return None
+        candidates = [acc] if _same_symbol(str(acc.get("symbol", "")), symbol) else []
+        pairs = acc.get("pairs")
+        if isinstance(pairs, dict):
+            candidates += [v for k, v in pairs.items() if isinstance(v, dict) and _same_symbol(k, symbol)]
+        for quote in candidates:
+            try:
+                bid = Decimal(str(quote.get("bid", 0)))
+                ask = Decimal(str(quote.get("ask", 0)))
+            except Exception:
+                continue
+            if bid > Decimal("0") and ask >= bid:
+                return bid, ask
         return None
 
     def write_mock_market_data(self, symbol: str, bid: Decimal | float, ask: Decimal | float) -> None:

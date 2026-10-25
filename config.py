@@ -64,6 +64,26 @@ A4_RESET_ON_INTERRUPTION: bool = True                 # [A4] Interrupted run res
 A5_EXPIRE_ON_HTF_CLOSE: bool = True                   # [A5] Setup expires when sweeping HTF candle closes
 A6_L_MUST_BE_IMMEDIATE_PREVIOUS_OPPOSITE: bool = True # [A6] L must be candle right before c1 and opposite colour
 
+# 1-Minute Sell Scenarios 1-4 (SELL_STRATEGY_PROMPT.md §7; trader decisions 2026-10-25)
+SELL_ENABLED_SCENARIOS: tuple[int, ...] = (1, 2, 3, 4)
+SELL_HTF_EQ_TOL_PIPS: float = 0.0                       # [ASSUMPTION] 0 = HTF highs exactly equal
+SELL_LTF_EQ_TOL_PIPS: float = 0.0                       # [ASSUMPTION] 0 = 1m highs exactly equal
+SELL_DOJI_BODY_TOL_PIPS: float = 0.0                    # [ASSUMPTION] 0 = open == close ("no body")
+SELL_MAX_DOJI_IN_SEQUENCE: int = 1                      # [ASSUMPTION] "an" indecisive candle
+SELL_SL_BUFFER_POINTS: int = 1                          # [ASSUMPTION] SL 1 point above B1's high
+SELL_B1_MUST_BE_HIGHEST: bool = True                    # [ASSUMPTION] B2/B3 may not exceed B1's high
+SELL_HTF_SETUP_EXPIRY_BARS: int = 3                     # [ASSUMPTION] setup armed for 3 HTF candles
+SELL_INVALIDATE_ON_CLOSE_ABOVE_HTF_HIGH: bool = False   # [ASSUMPTION] optional cancel rule, off
+SELL_LTF_NEAR_HTF_HIGH_PIPS: Optional[float] = None     # [ASSUMPTION] optional proximity filter, off
+SELL_MAX_TRADES_PER_SETUP: int = 1                      # [ASSUMPTION] one trade per HTF setup
+SELL_MAX_OPEN_POSITIONS: Optional[int] = None           # Trader: no limit (the spec default was 1)
+SELL_ENTRY_FILL: str = "next_bar_open"                  # [ASSUMPTION] backtest fill; "b3_close" = Pine
+SELL_SAME_BAR_SL_TP: str = "SL_FIRST"                   # [ASSUMPTION] bar data cannot order SL and TP
+SELL_MAX_1M_GAP_MINUTES: int = 5                        # Feed outage: no 1m sequence spans a longer gap
+SELL_SESSION_START_HOUR: int = 7                        # Trader: London, London-NY and NY sessions (UTC)
+SELL_SESSION_END_HOUR: int = 21
+SELL_SESSION_WEEKDAYS: tuple[int, ...] = (0, 1, 2, 3, 4)  # Monday-Friday
+
 # Exact 1% Risk Sizing Config Constants (Section 6)
 RISK_PERCENT: float = 1.0
 RISK_BASIS: str = "balance"
@@ -89,7 +109,7 @@ class AppConfig:
     # Market Strategy
     symbol: str = "EURUSD"
     timeframe: str = "M5"
-    strategy_mode: str = "strict_compliance"  # "strict_compliance", "c1_wickswap", or "institutional"
+    strategy_mode: str = "strict_compliance"  # "strict_compliance", "c1_wickswap", "institutional", or "sell_scenarios"
     enable_intrabar_sweep: bool = True  # Enable intrabar sweep detection during HTF formation
     rr_multiple: int = RR_MULTIPLE
     confirm_candles: int = CONFIRM_CANDLES
@@ -103,7 +123,7 @@ class AppConfig:
 
     # Risk Guardrails
     max_daily_loss_pct: Optional[Decimal] = Decimal("0.03")  # None = unlimited / disabled
-    max_open_trades: int = 1
+    max_open_trades: Optional[int] = 1  # None = unlimited open trades (no position limit)
     max_daily_trades: Optional[int] = None  # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")
     session_filter_enabled: bool = True
@@ -146,7 +166,7 @@ class AppConfig:
         if self.max_daily_loss_pct is not None:
             if self.max_daily_loss_pct <= 0 or self.max_daily_loss_pct > Decimal("0.10"):
                 raise ValueError(f"Daily loss limit must be between 0.01 and 0.10 (got: {self.max_daily_loss_pct})")
-        if self.max_open_trades < 1:
+        if self.max_open_trades is not None and self.max_open_trades < 1:
             raise ValueError("Max open trades must be >= 1")
         if self.max_daily_trades is not None and self.max_daily_trades < 1:
             raise ValueError("Max daily trades must be >= 1")
@@ -172,6 +192,11 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
     mt4_dir = Path(raw_dir)
     mt4_dir.mkdir(parents=True, exist_ok=True)
 
+    raw_max_open = get_var("MAX_OPEN_TRADES", "1")
+    max_open_trades_val: Optional[int] = None
+    if raw_max_open and raw_max_open.strip().lower() not in ("0", "none", "unlimited", "null", ""):
+        max_open_trades_val = int(raw_max_open)
+
     raw_max_trades = get_var("MAX_DAILY_TRADES", "")
     max_daily_trades_val: Optional[int] = None
     if raw_max_trades and raw_max_trades.strip().lower() not in ("0", "none", "unlimited", "null", ""):
@@ -191,7 +216,7 @@ def load_config(env_file: Optional[str | Path] = None) -> AppConfig:
         initial_balance=Decimal(get_var("ACCOUNT_INITIAL_BALANCE", "10000.00")),
         risk_pct=Decimal(get_var("RISK_PER_TRADE_PCT", "0.01")),
         max_daily_loss_pct=max_daily_loss_pct_val,
-        max_open_trades=int(get_var("MAX_OPEN_TRADES", "1")),
+        max_open_trades=max_open_trades_val,
         max_daily_trades=max_daily_trades_val,
         max_spread_pips=Decimal(get_var("MAX_SPREAD_PIPS", "2.5")),
         session_filter_enabled=get_var("SESSION_FILTER_ENABLED", "true").lower() in ("true", "1", "yes"),

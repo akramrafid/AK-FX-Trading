@@ -117,6 +117,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Complete report in docs/qa/phase1-report.md confirming zero intrabar leakage, exact 10:1 math, and passing tests.
   - **Verify:** python tests/test_rule_engine.py
 
+- [x] **P1-C01** ★ 1-Minute Sell Scenarios 1-4 Rule Engine (change request 2026-10-25)
+  - **Owner:** senior-system-architect
+  - **Deps:** P1-G1
+  - **Files:** engine/sell_scenarios.py, config.py, tests/test_sell_scenarios.py
+  - **Do:** Implement SELL_STRATEGY_PROMPT.md as the opt-in mode `sell_scenarios`: closed M5/M15 equal top or wick sweep arms a setup for 3 HTF candles; 1m A/B1/B2/B3 trigger with at most one doji; SL = B1 high + 1 point; integer-point comparisons; §7 parameters as config.py constants.
+  - **Accept:** All §11 cases (T1-T6, N1-N11, E1-E3, replay, mutation) pass; existing modes unchanged.
+  - **Verify:** python -m unittest discover -s tests -p "test_sell_scenarios.py"
+
 ---
 
 ## Phase 2 — Architecture & Backtesting
@@ -169,6 +177,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Comprehensive Phase 2 verification report detailing win rate, average R, max drawdown, and strategy viability.
   - **Verify:** python tests/test_backtester.py
 
+- [x] **P2-C01** Sell Scenarios Backtest Runner & USDCAD Report (change request 2026-10-25)
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P1-C01
+  - **Files:** engine/sell_scenarios_backtest.py, scripts/run_sell_scenarios_backtest.py, docs/qa/sell-scenarios-backtest-report.md, docs/qa/sell-scenarios-journal-spread-0.0.csv, docs/qa/sell-scenarios-journal-spread-0.5.csv
+  - **Do:** Replay recorded USDCAD 1m bars with the broker's own M5/M15 bars through the same engine: next-bar-open fill, TP from the fill, shorts closed at the ask, SL first on same-bar touches, SL/TP only, 1% of balance. Journal every trade and skipped signal in UTC and UTC+6.
+  - **Accept:** Report with per-scenario and total metrics, spread sensitivity, position-limit comparison and 10 sample trades; journal CSVs written.
+  - **Verify:** python scripts/run_sell_scenarios_backtest.py
+
 ---
 
 ## Phase 3 — MT4 Execution Bridge
@@ -220,6 +236,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Do:** Run bridge test suite, verify file protocol roundtrip, validate position sizing edge cases, and compile Phase 3 gate report.
   - **Accept:** Comprehensive Phase 3 verification report confirming MT4 EA readiness, atomic command protocol, and passing tests.
   - **Verify:** python tests/test_bridge.py
+
+- [x] **P3-C01** Sell Scenarios Live Wiring & TradingView Port (change request 2026-10-25)
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P1-C01
+  - **Files:** bridge/executor.py, bridge/dwx_client.py, api/server.py, risk/models.py, .env.example, docs/qa/AK_Sell_Scenarios_TradingView.pine
+  - **Do:** Select the engine with STRATEGY_MODE=sell_scenarios in the bridge and the desk API; price the TP from the live bid the EA writes to DWX_Account.txt at send time, sending nothing without a fresh quote or when the ask is at or above the SL; journal signals and skips to audit_logs; MAX_OPEN_TRADES=0 means no limit; Pine v5 port for chart checks.
+  - **Accept:** Bridge tests for TP-from-bid (EA account format), NO_LIVE_QUOTE and the SL-not-above-ask rejection pass; no post-entry modifications in this mode.
+  - **Verify:** python -m unittest discover -s tests -p "test_sell_scenarios.py"
 
 ---
 

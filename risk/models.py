@@ -34,7 +34,7 @@ class TradeRejectionReason(str, Enum):
 class RiskLimits:
     """Configurable system risk limits and safety bounds."""
     max_daily_loss_pct: Optional[Decimal] = Decimal("0.03")  # None = disabled
-    max_open_trades: int = 1                       # Maximum concurrent open trades
+    max_open_trades: Optional[int] = 1             # Maximum concurrent open trades (None or 0 = unlimited)
     max_daily_trades: Optional[int] = None         # None = unlimited daily trades (no trade limits)
     max_spread_pips: Decimal = Decimal("2.5")      # Maximum allowed spread ceiling in pips
     close_all_on_daily_limit_breach: bool = False  # False = let SL protect, True = close immediately

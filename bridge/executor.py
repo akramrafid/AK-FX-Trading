@@ -50,6 +50,7 @@ from config import (
 from database.sqlite_manager import TradingDatabase
 from engine.models import Candle, Direction, TradeSignal
 from engine.rule_engine import RuleEngine
+from engine.sell_scenarios import SellScenarioEngine, SellScenarioParams
 from risk.guardrails import RiskGuardrails
 from risk.models import AccountState, ValidationResult
 
@@ -76,6 +77,25 @@ def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
     """
     base = (dt.month * 10_000_000) + (dt.day * 100_000) + (dt.hour * 1000) + (dt.minute * 10) + (sequence % 10)
     return int(base % 2_000_000_000)
+
+
+def build_sell_scenario_engine(cfg: Any, symbol: str, db: Optional[TradingDatabase] = None) -> SellScenarioEngine:
+    """Sell Scenarios engine for the live bridge (STRATEGY_MODE=sell_scenarios).
+
+    The session and open-position limit come from the same AppConfig as the risk guardrails.
+    Every signal and skipped signal is journaled to audit_logs (plan.md §3.9).
+    """
+    sink: Optional[Callable[[Dict[str, Any]], None]] = None
+    if db is not None:
+        def sink(record: Dict[str, Any]) -> None:
+            event = "SELL_SCENARIO_SIGNAL" if record["event"] == "SIGNAL" else "SELL_SCENARIO_SKIPPED"
+            db.log_audit_event(event, "sell_scenarios", {"symbol": symbol, **record})
+
+    return SellScenarioEngine(
+        params=SellScenarioParams.from_app_config(cfg, symbol),
+        symbol=symbol,
+        event_sink=sink,
+    )
 
 
 @dataclass
@@ -421,6 +441,48 @@ class BridgeExecutor:
 
         return dispatched_record
 
+    def _reject_signal(
+        self,
+        signal: TradeSignal,
+        signal_key: str,
+        signal_dir: Direction,
+        entry: Decimal,
+        sl: Decimal,
+        tp: Decimal,
+        reason: str,
+    ) -> BridgeOrderRecord:
+        """Records a signal that sends no order: journal row, REJECTED order record and callback."""
+        if self.db is not None:
+            try:
+                self.db.save_signal(
+                    signal=signal,
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    executed=False,
+                    rejection_reason=reason,
+                )
+            except Exception as e:
+                logger.error(f"Failed to log rejected signal to DB: {e}")
+        record = BridgeOrderRecord(
+            magic=0,
+            signal_id=signal_key,
+            symbol=self.symbol,
+            direction=signal_dir,
+            lots=Decimal("0.00"),
+            entry_price=entry,
+            sl_price=sl,
+            tp_price=tp,
+            risk_pips=Decimal("0.0"),
+            reward_pips=Decimal("0.0"),
+            dispatched_at=datetime.now(timezone.utc),
+            status="REJECTED",
+            rejection_reason=reason,
+        )
+        self.order_records.append(record)
+        if self.on_order_callback:
+            self.on_order_callback(record)
+        return record
+
     def _execute_signal(self, signal: TradeSignal) -> Optional[BridgeOrderRecord]:
         """Validates signal, computes dynamic position size, and dispatches to MT4."""
         signal_dir = Direction.BUY if str(signal.direction).upper() == "BUY" else Direction.SELL
@@ -545,6 +607,14 @@ class BridgeExecutor:
             # distance = |quote - SL|. Spread is inherent in live quote.
             live_quote: Optional[Decimal] = None
             quotes = self.dwx_client.read_market_quote(self.symbol)
+            # Sell Scenarios price the TP from the fill, so they need the live quote the EA writes to
+            # DWX_Account.txt; without a fresh one nothing is sent.
+            tp_from_quote = bool(getattr(self.rule_engine, "tp_from_fill", False))
+            if tp_from_quote:
+                quotes = self.dwx_client.read_account_quote(self.symbol, self.balance_max_age_seconds) or quotes
+                if quotes is None:
+                    logger.warning(f"[{self.symbol}] No fresh live quote from MT4. Sending no order.")
+                    return self._reject_signal(signal, signal_key, signal_dir, entry_dec, sl_dec, tp_dec, "NO_LIVE_QUOTE")
             if quotes is not None:
                 bid, ask = quotes
                 live_quote = ask if signal_dir == Direction.BUY else bid
@@ -552,6 +622,11 @@ class BridgeExecutor:
                 live_quote = entry_dec
 
             _quote_dec, distance = calculate_r3_quote_distance(live_quote, sl_dec)
+
+            # MT4 rejects a sell whose SL is not above the ask, so such a signal sends nothing.
+            if tp_from_quote and signal_dir == Direction.SELL and quotes[1] >= sl_dec:
+                logger.warning(f"[{self.symbol}] Ask {quotes[1]} is at or above SL {sl_dec}. Sending no order.")
+                return self._reject_signal(signal, signal_key, signal_dir, entry_dec, sl_dec, tp_dec, "SL_NOT_ABOVE_ASK")
 
             # [R4] Tick size, tick value, and per-lot loss at the stop
             # per_lot_loss = (distance / tick_size) * tick_value + COMMISSION_PER_LOT_ROUND_TURN ($7.00/lot)
@@ -613,8 +688,9 @@ class BridgeExecutor:
                 quote=live_quote,
                 sl=sl_dec,
                 direction=signal_dir,
+                rr_multiple=getattr(self.rule_engine, "reward_risk_ratio", 10),
                 digits=5 if "JPY" not in self.symbol.upper() else 3,
-                strategy_tp=tp_dec,
+                strategy_tp=None if tp_from_quote else tp_dec,
             )
 
         # ── Non-Bypassable Risk Guardrail Gate ──────────────────────────
@@ -1048,6 +1124,8 @@ def main() -> None:
         preset_name = "Strict Compliance (1:10 R:R, 100% AK Rules [S1-S6/B1-B6])"
     elif mode_str == "c1_wickswap":
         preset_name = "C1 Wick-Swap (1:5 R:R, BE @ 2R, C1 SL)"
+    elif mode_str == "sell_scenarios":
+        preset_name = "Sell Scenarios 1-4 (1m entry on M5/M15 setup, 1:10 R:R, SL/TP only)"
     else:
         preset_name = "Institutional Preset"
 
@@ -1069,6 +1147,8 @@ def main() -> None:
                 spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
                 enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
             )
+        elif mode_str == "sell_scenarios":
+            engine = build_sell_scenario_engine(cfg, sym, db)
         else:
             engine = RuleEngine.institutional_preset(
                 symbol=sym,
@@ -1095,7 +1175,10 @@ def main() -> None:
             risk_percent=Decimal(str(getattr(cfg, "risk_percent", RISK_PERCENT))),
             commission_per_lot_round_turn=Decimal(str(getattr(cfg, "commission_per_lot_round_turn", COMMISSION_PER_LOT_ROUND_TURN))),
             risk_deviation_tolerance_pct=getattr(cfg, "risk_deviation_tolerance_pct", RISK_DEVIATION_TOLERANCE_PCT),
-            allow_post_entry_modifications=getattr(cfg, "allow_post_entry_modifications", False),
+            # Sell Scenarios exit at SL or TP only: no break-even, trailing or partial close.
+            allow_post_entry_modifications=(
+                False if mode_str == "sell_scenarios" else getattr(cfg, "allow_post_entry_modifications", False)
+            ),
         )
         bridges.append(b)
 

@@ -35,14 +35,16 @@ A production-grade automated algorithmic Forex trading system executing a propri
 4. **Non-Bypassable Risk Guardrails Layer:** The risk engine sits between the rule engine and the order execution bridge.
    - Max risk per trade: fixed % (e.g., 1.0% or 0.5%) of current balance.
    - Daily loss circuit breaker: if cumulative daily realized + unrealized loss hits threshold (e.g., 3-4%), trading is halted for the rest of the 24h trading day.
-   - Max concurrent open positions limit.
+   - Max concurrent open positions limit, set by the operator (`MAX_OPEN_TRADES`; `0` = no limit, the trader's choice on 2026-10-25).
    - This layer can NEVER be bypassed or relaxed by any rule engine update or future ML/RL model.
 5. **Fixed 10:1 Reward-to-Risk & Asymmetrical Stop-Loss Placement:**
    - Long trades: Stop-loss sits just below the low of the first candle in the 3-candle confirmation sequence (`SL = candle_1.low - buffer`).
    - Short trades: Stop-loss sits just above the high of the first candle in the 3-candle confirmation sequence (`SL = candle_1.high + spread + buffer`).
    - Take-profit: Strictly fixed at 10x the stop-loss distance (`TP = entry ± 10 × stop_distance`).
-6. **Execution Timeframe Invariant (5-Minute / M5):** Strategy rules, bar close events, and historical data testing operate on the M5 timeframe.
+   - Sell Scenarios mode (`STRATEGY_MODE=sell_scenarios`, `SELL_STRATEGY_PROMPT.md`): `SL = B1.high + 1 point`. The spread is applied where a short closes (at the ask), not added to the SL. `TP = fill − 10 × (SL − fill)`: from the actual fill in the backtest, from the live bid in the bridge. A sell whose SL is not above the ask is not sent.
+6. **Execution Timeframe Invariant:** Entries are evaluated on closed 1-minute (M1) candles, with the higher-timeframe conditions on M5 and M15 candles (closed candles only in Sell Scenarios mode). The single-timeframe fallback path (no M1 export) runs on M5. Changed from "M5 only" on 2026-10-25 with the Sell Scenarios requirement; the multi-timeframe modes already entered on M1.
 7. **3 Consecutive Candles Confirmation Test:** Following a qualifying sweep candle (Variant A candle-to-candle or Variant B swing-level), the subsequent 3 closed candles must all close in the trade's direction (3 consecutive bullish/green candles for Long, 3 consecutive bearish/red candles for Short).
+   - Sell Scenarios mode: the 3 candles B1–B3 follow a bullish 1m candle A whose high B1 equals or sweeps. None may be bullish and at most one may be a doji (open = close; Scenarios 3 and 4); B1 keeps the highest high. The setup is a closed M5/M15 equal top or wick sweep (`SELL_STRATEGY_PROMPT.md` §3–§5).
 8. **Order Idempotency & Magic Numbers:** Every generated order must carry a unique timestamp-derived deterministic magic number/idempotency key. The execution bridge must verify whether an order for the current closed bar has already been dispatched before writing an execution command to prevent duplicate orders during network lag or EA polling delays.
 9. **Comprehensive Trade Journaling from Day 1:** Every detected sweep signal, confirmation status, rejected order (due to risk limits), theoretical entry, actual fill price, slippage in pips, and final trade outcome must be permanently logged to PostgreSQL.
 
@@ -98,3 +100,12 @@ Aligned with the user specification:
    - *Decision:* Confirmed. 5-Minute (M5) candle sweep and execution.
 3. **"3 Consecutive Candles" Confirmation Exact Definition:**
    - *Decision:* Confirmed. Candle Color/Direction only: all 3 confirmation candles must close strictly in the trade direction (3 bullish/green for long, 3 bearish/red for short).
+4. **1-Minute Sell Scenarios 1–4 (requirement change, 2026-10-25):**
+   - *Decision:* `SELL_STRATEGY_PROMPT.md` and its two screenshots are the approved rules, built as the opt-in `STRATEGY_MODE=sell_scenarios` (`engine/sell_scenarios.py`). The other strategy modes are unchanged; item 3 does not apply to this mode, which allows one doji.
+   - *Decision:* HTF candles are the broker's own M5/M15 bars (the MT4 export live, `data/trading.db` in the backtest).
+   - *Decision:* Live TP is priced from the live bid when the order is sent and never modified afterwards.
+   - *Decision:* The backtest is reported at 0 spread and at a 0.5 pip placeholder (no spread history is recorded), with net R after the $7/lot commission alongside.
+   - *Decision:* Trades in the London, London–NY and NY sessions: 07:00–21:00 UTC, Monday–Friday, on B3's open time.
+   - *Decision:* No limit on open trades or daily trades (`MAX_OPEN_TRADES=0`, `MAX_DAILY_TRADES=0`). The daily loss circuit breaker stays.
+   - *Decision:* Risk 1% of the account balance per trade; reward:risk 1:10.
+   - *Decision:* A gap of more than 5 minutes in the 1m feed is an outage: no 1m sequence spans it and no fill is simulated across it.

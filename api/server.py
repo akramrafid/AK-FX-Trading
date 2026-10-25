@@ -491,7 +491,7 @@ class BridgeController:
                 from config import load_config
                 from bridge.dwx_client import DWXClient
                 from bridge.sizing import PositionSizer
-                from bridge.executor import BridgeExecutor
+                from bridge.executor import BridgeExecutor, build_sell_scenario_engine
                 from engine.rule_engine import RuleEngine
                 from risk.models import RiskLimits
                 from risk.guardrails import RiskGuardrails
@@ -616,6 +616,8 @@ class BridgeController:
                             spread_pips=float(getattr(cfg, "max_spread_pips", 1.8)),
                             enable_intrabar_sweep=getattr(cfg, "enable_intrabar_sweep", True),
                         )
+                    elif strat_mode == "sell_scenarios":
+                        engine = build_sell_scenario_engine(cfg, sym, db)
                     else:
                         engine = RuleEngine.institutional_preset(
                             symbol=sym,

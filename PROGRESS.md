@@ -392,3 +392,14 @@
 - Session filter expanded from 07:00 - 17:00 UTC to 07:00 - 21:00 UTC (covering London open 07:00 UTC, London/NY overlap 12:00-16:00 UTC, and NY afternoon session through 21:00 UTC close).
 **Status:** COMPLETED
 
+### 2026-10-26 00:13 — CHANGE REQUEST: 1-Minute Sell Scenarios 1-4 (P1-C01, P2-C01, P3-C01)
+**Owner:** senior-system-architect / senior-backend-engineer / senior-integration-engineer
+**Changed:** engine/sell_scenarios.py, engine/sell_scenarios_backtest.py, scripts/run_sell_scenarios_backtest.py, tests/test_sell_scenarios.py, docs/qa/AK_Sell_Scenarios_TradingView.pine, docs/qa/sell-scenarios-backtest-report.md, docs/qa/sell-scenarios-journal-spread-0.0.csv, docs/qa/sell-scenarios-journal-spread-0.5.csv (all new); config.py, bridge/executor.py, bridge/dwx_client.py, api/server.py, risk/models.py, .env.example, plan.md (§3.4-§3.7, §9.4), ToDos.md
+**Verified:** `python -m unittest discover -s tests` (292 tests OK, run on an isolated copy because tests/test_api.py writes to the live data/trading.db). `python -m orchestrator.cli lint` clean. `python scripts/run_sell_scenarios_backtest.py` wrote the report and both journals. One trade checked by hand against the raw DB bars.
+**Telemetry/Metrics:** 
+- USDCAD 1m from 2026-10-05 to 2026-10-23 (9,517 bars, 14 trading days) with the broker's own M5/M15 bars, spread 0: 65 trades, 7.7% win rate, -10.1R, max drawdown 33.5%, longest losing streak 32.
+- 9 of those trades stayed open through recording gaps (+24.0R, 3 of the 5 winners). Without them: 56 trades, 3.6% win rate, -34.1R.
+- One position at a time: 31 trades, +12.9R, max drawdown 10.5%; without its 5 gap-held trades -15.1R.
+**Notes:** SELL_STRATEGY_PROMPT.md approved as a requirement change and built as the opt-in STRATEGY_MODE=sell_scenarios; the other modes are unchanged. Trader decisions are in plan.md §9.4: no limit on open or daily trades, London / London-NY / NY session (07:00-21:00 UTC), 1% of balance per trade, 1:10. Code review (python-reviewer) fixed: the live quote now comes from DWX_Account.txt as the EA writes it (no fresh quote = no order), stops gapped through fill at the bar's open, Pine margin. Open, for the operator: the live daily-loss and spread guardrails receive constant zeros (pre-existing; MAX_DAILY_LOSS_PCT=0 in .env also disables the breaker), and an unknown STRATEGY_MODE silently runs the institutional preset. The secret-read guard blocks the agent from opening .env, so the operator applies the .env keys. Not committed.
+**Status:** COMPLETED (live activation waits for the .env update)
+
