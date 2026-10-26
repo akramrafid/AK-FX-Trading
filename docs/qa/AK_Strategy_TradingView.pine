@@ -1,0 +1,362 @@
+//@version=5
+strategy("AK Strategy Backtester (Strict Compliance)", overlay=true, initial_capital=5000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, process_orders_on_close=true, max_boxes_count=50, max_lines_count=500, max_labels_count=500)
+
+//=============================================================================
+// 1. INPUT PARAMETERS
+//=============================================================================
+grp_rules = "1. Strategy Rules & Pricing"
+rr_ratio        = input.float(10.0, "Reward-to-Risk Ratio (e.g. 10.0 for 1:10)", step=0.5, group=grp_rules)
+risk_pct        = input.float(1.0, "Risk % of Equity per Trade", step=0.1, minval=0.1, maxval=10.0, group=grp_rules)
+be_r            = input.float(2.0, "Move SL to Breakeven at +X.X R (0 = disabled)", step=0.5, minval=0.0, group=grp_rules)
+
+grp_htf = "2. Higher Timeframe Liquidity Sweeps (Rules S1 / B1)"
+use_m5          = input.bool(true, "Check M5 Liquidity Sweeps", group=grp_htf)
+use_m15         = input.bool(true, "Check M15 Liquidity Sweeps", group=grp_htf)
+watch_window    = input.int(15, "Armed Watch Window (M1 Bars before expiry)", minval=1, maxval=45, group=grp_htf)
+expire_on_close = input.bool(false, "Expire Sweep When HTF Candle Closes (Rule A5)", group=grp_htf, tooltip="When enabled, pending sweep expires immediately when the HTF candle closes, matching Rule A5 strictly. When false, setup stays armed for the Watch Window duration.")
+
+grp_gate = "3. M1 Method Gate Rules (Rules S2 / B2)"
+use_gate        = input.bool(true, "Require S2/B2 Wick Swap or Equal Top/Low", group=grp_gate, tooltip="Strict AK Strategy requires c1 to wick-swap or equal L's extreme. If false, executes on any 3 directional candles following sweep.")
+equal_points    = input.float(0.0, "Equal Top/Low Tolerance (Points)", minval=0.0, step=0.1, group=grp_gate, tooltip="Strict AK spec EQUAL_TOLERANCE_POINTS = 0.0. c1 must equal or exceed L's extreme.")
+
+grp_session = "4. Trading Session Filter"
+use_session     = input.bool(true, "Enable Session Hours Filter", group=grp_session)
+session_hours   = input.session("0700-1800:23456", "Session Hours (UTC: 07:00 - 18:00)", group=grp_session, tooltip="Active London & New York overlap. 07:00 to 18:00 UTC (1 PM to 12 AM Dhaka, Monday-Friday).")
+
+grp_display = "5. Display & Visuals"
+show_markers    = input.bool(true, "Plot BUY / SELL Arrows & Sweep Markers", group=grp_display)
+show_labels     = input.bool(true, "Show Clean BUY / SELL Price Labels", group=grp_display)
+show_trade_lines= input.bool(true, "Draw Active Entry / SL / TP / BE Levels", group=grp_display)
+show_session_bg = input.bool(true, "Highlight Trading Session Background", group=grp_display)
+show_dashboard  = input.bool(true, "Show Real-Time Metric Dashboard", group=grp_display)
+
+//=============================================================================
+// 2. TIMEFRAME INTEGRITY & SESSION FILTER
+//=============================================================================
+is_m1 = timeframe.isintraday and timeframe.multiplier == 1
+in_session = use_session ? not na(time(timeframe.period, session_hours, "UTC")) : true
+
+if not is_m1 and barstate.islast
+    runtime.error("AK Strategy is designed strictly for the 1-minute (M1) chart. Please switch chart timeframe to 1m.")
+
+//=============================================================================
+// 3. ZERO-REPAINT MULTI-TIMEFRAME HTF BAR AGGREGATION
+//=============================================================================
+// M5 Bar Construction from closed M1 candles
+var float m5_open = na
+var float m5_high = na
+var float m5_low = na
+var float m5_close = na
+var float m5_prev_open = na
+var float m5_prev_high = na
+var float m5_prev_low = na
+var float m5_prev_close = na
+
+is_new_m5 = ta.change(time("5")) != 0
+
+if is_new_m5
+    m5_prev_open  := m5_open
+    m5_prev_high  := m5_high
+    m5_prev_low   := m5_low
+    m5_prev_close := m5_close
+    m5_open       := open
+    m5_high       := high
+    m5_low        := low
+    m5_close      := close
+else
+    m5_high  := math.max(nz(m5_high, high), high)
+    m5_low   := math.min(nz(m5_low, low), low)
+    m5_close := close
+
+// M15 Bar Construction from closed M1 candles
+var float m15_open = na
+var float m15_high = na
+var float m15_low = na
+var float m15_close = na
+var float m15_prev_open = na
+var float m15_prev_high = na
+var float m15_prev_low = na
+var float m15_prev_close = na
+
+is_new_m15 = ta.change(time("15")) != 0
+
+if is_new_m15
+    m15_prev_open  := m15_open
+    m15_prev_high  := m15_high
+    m15_prev_low   := m15_low
+    m15_prev_close := m15_close
+    m15_open       := open
+    m15_high       := high
+    m15_low        := low
+    m15_close      := close
+else
+    m15_high  := math.max(nz(m15_high, high), high)
+    m15_low   := math.min(nz(m15_low, low), low)
+    m15_close := close
+
+//=============================================================================
+// 4. HTF SWEEP DETECTION (RULES S1 / B1)
+//=============================================================================
+// Rule S1: HTF Sell Sweep
+// - P is bullish (P.close > P.open)
+// - H sweeps P's high (H.high > P.high)
+// - H is currently bearish (H.close < H.open)
+m5_s1_sweep = use_m5 and not na(m5_prev_open) and (m5_prev_close > m5_prev_open) and (m5_high > m5_prev_high) and (m5_close < m5_open)
+m15_s1_sweep = use_m15 and not na(m15_prev_open) and (m15_prev_close > m15_prev_open) and (m15_high > m15_prev_high) and (m15_close < m15_open)
+sell_sweep = m5_s1_sweep or m15_s1_sweep
+
+// Rule B1: HTF Buy Sweep
+// - P is bearish (P.close < P.open)
+// - H sweeps P's low (H.low < P.low)
+// - H is currently bullish (H.close > H.open)
+m5_b1_sweep = use_m5 and not na(m5_prev_open) and (m5_prev_close < m5_prev_open) and (m5_low < m5_prev_low) and (m5_close > m5_open)
+m15_b1_sweep = use_m15 and not na(m15_prev_open) and (m15_prev_close < m15_prev_open) and (m15_low < m15_prev_low) and (m15_close > m15_open)
+buy_sweep = m5_b1_sweep or m15_b1_sweep
+
+// Armed State Engine (watches M1 for up to watch_window candles)
+var bool armed_buy = false
+var bool armed_sell = false
+var int  watch_counter = 0
+
+if buy_sweep
+    armed_buy := true
+    armed_sell := false
+    watch_counter := 0
+
+if sell_sweep
+    armed_sell := true
+    armed_buy := false
+    watch_counter := 0
+
+if (armed_buy or armed_sell)
+    watch_counter += 1
+    if watch_counter > watch_window
+        armed_buy := false
+        armed_sell := false
+        watch_counter := 0
+
+// Rule A5: Optional expiration when HTF candle closes
+if expire_on_close and is_new_m5 and not (use_m15 and not is_new_m15)
+    armed_buy := false
+    armed_sell := false
+    watch_counter := 0
+
+//=============================================================================
+// 5. M1 CANDLE CLASSIFICATION & GATE EVALUATION (RULES S2/S3 & B2/B3)
+//=============================================================================
+// Definitions:
+// c3 = Current closed M1 candle (bar index 0)
+// c2 = M1 candle 1 bar ago (bar index 1)
+// c1 = M1 candle 2 bars ago (bar index 2)
+// L  = M1 candle immediately before c1 (bar index 3)
+
+c3_bull = close > open
+c3_bear = close < open
+
+c2_bull = close[1] > open[1]
+c2_bear = close[1] < open[1]
+
+c1_bull = close[2] > open[2]
+c1_bear = close[2] < open[2]
+
+l_bull  = close[3] > open[3]
+l_bear  = close[3] < open[3]
+
+tol_dist = equal_points * syminfo.mintick
+
+// --- SELL EVALUATION ---
+// Rule S2: L must be bullish, c1 must be bearish. c1.high >= L.high (equal top or wick swap).
+s2_equal_top = math.abs(high[2] - high[3]) <= tol_dist
+s2_wick_swap = high[2] > high[3]
+rule_s2_pass = not use_gate or (l_bull and c1_bear and (s2_equal_top or s2_wick_swap))
+
+// Rule S3: 3 consecutive bearish M1 closes (c1, c2, c3 all close < open)
+rule_s3_pass = c1_bear and c2_bear and c3_bear
+
+// Sell Signal Trigger
+sell_signal = armed_sell and rule_s2_pass and rule_s3_pass and in_session
+
+// --- BUY EVALUATION ---
+// Rule B2: L must be bearish, c1 must be bullish. c1.low <= L.low (equal low or wick swap).
+b2_equal_low = math.abs(low[2] - low[3]) <= tol_dist
+b2_wick_swap = low[2] < low[3]
+rule_b2_pass = not use_gate or (l_bear and c1_bull and (b2_equal_low or b2_wick_swap))
+
+// Rule B3: 3 consecutive bullish M1 closes (c1, c2, c3 all close > open)
+rule_b3_pass = c1_bull and c2_bull and c3_bull
+
+// Buy Signal Trigger
+buy_signal = armed_buy and rule_b2_pass and rule_b3_pass and in_session
+
+//=============================================================================
+// 6. STRATEGY EXECUTION & RISK MANAGEMENT
+//=============================================================================
+var float curr_entry = na
+var float curr_sl    = na
+var float curr_tp    = na
+var float curr_risk  = na
+var bool  sl_at_be   = false
+var string curr_dir  = ""
+
+// BUY Execution
+if (buy_signal and strategy.position_size == 0)
+    entry_price = close
+    sl_price    = low[2] // Rule B5: Stop loss strictly at c1's low wick
+    risk_dist   = entry_price - sl_price
+    
+    // Invalidation check: Stop loss must be strictly below entry (risk > 0)
+    if (risk_dist > 0)
+        tp_price = entry_price + (rr_ratio * risk_dist) // Rule B6: 1:10 Take Profit
+        
+        // 1% Risk Sizing based on equity
+        risk_cash   = strategy.equity * (risk_pct / 100.0)
+        pv          = (not na(syminfo.pointvalue) and syminfo.pointvalue > 0) ? syminfo.pointvalue : 1.0
+        point_risk  = risk_dist * pv
+        qty_size    = point_risk > 0 ? (risk_cash / point_risk) : na
+        
+        curr_entry  := entry_price
+        curr_sl     := sl_price
+        curr_tp     := tp_price
+        curr_risk   := risk_dist
+        sl_at_be    := false
+        armed_buy   := false
+        curr_dir    := "BUY"
+        
+        if show_labels
+            label.new(x=bar_index, y=low, text="▲ BUY\n" + str.tostring(entry_price, "#.5"), style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+        
+        strategy.entry("AK_BUY", strategy.long, qty=qty_size)
+        strategy.exit("Exit_BUY", "AK_BUY", stop=curr_sl, limit=curr_tp)
+
+// SELL Execution
+if (sell_signal and strategy.position_size == 0)
+    entry_price = close
+    sl_price    = high[2] // Rule S5: Stop loss strictly at c1's high wick
+    risk_dist   = sl_price - entry_price
+    
+    // Invalidation check: Stop loss must be strictly above entry (risk > 0)
+    if (risk_dist > 0)
+        tp_price = entry_price - (rr_ratio * risk_dist) // Rule S6: 1:10 Take Profit
+        
+        // 1% Risk Sizing based on equity
+        risk_cash   = strategy.equity * (risk_pct / 100.0)
+        pv          = (not na(syminfo.pointvalue) and syminfo.pointvalue > 0) ? syminfo.pointvalue : 1.0
+        point_risk  = risk_dist * pv
+        qty_size    = point_risk > 0 ? (risk_cash / point_risk) : na
+        
+        curr_entry  := entry_price
+        curr_sl     := sl_price
+        curr_tp     := tp_price
+        curr_risk   := risk_dist
+        sl_at_be    := false
+        armed_sell  := false
+        curr_dir    := "SELL"
+        
+        if show_labels
+            label.new(x=bar_index, y=high, text="▼ SELL\n" + str.tostring(entry_price, "#.5"), style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+        
+        strategy.entry("AK_SELL", strategy.short, qty=qty_size)
+        strategy.exit("Exit_SELL", "AK_SELL", stop=curr_sl, limit=curr_tp)
+
+//=============================================================================
+// 7. BREAKEVEN MANAGEMENT (+2.0R ADJUSTMENT)
+//=============================================================================
+if (strategy.position_size > 0 and not sl_at_be and be_r > 0)
+    be_target = curr_entry + (be_r * curr_risk)
+    if (high >= be_target)
+        sl_at_be := true
+        curr_sl  := curr_entry
+        strategy.exit("Exit_BUY", "AK_BUY", stop=curr_sl, limit=curr_tp)
+
+if (strategy.position_size < 0 and not sl_at_be and be_r > 0)
+    be_target = curr_entry - (be_r * curr_risk)
+    if (low <= be_target)
+        sl_at_be := true
+        curr_sl  := curr_entry
+        strategy.exit("Exit_SELL", "AK_SELL", stop=curr_sl, limit=curr_tp)
+
+// Reset state when trade is closed
+if (strategy.position_size == 0 and strategy.position_size[1] != 0)
+    curr_entry := na
+    curr_sl    := na
+    curr_tp    := na
+    curr_risk  := na
+    sl_at_be   := false
+    curr_dir   := ""
+
+//=============================================================================
+// 8. VISUAL OVERLAYS, PLOTS & SIGNAL MARKERS
+//=============================================================================
+// Active Trade Price Levels (SL, TP, Entry, BE)
+be_line_buy  = (strategy.position_size > 0 and not sl_at_be and be_r > 0) ? curr_entry + (be_r * curr_risk) : na
+be_line_sell = (strategy.position_size < 0 and not sl_at_be and be_r > 0) ? curr_entry - (be_r * curr_risk) : na
+
+plot(show_trade_lines and strategy.position_size != 0 ? curr_sl : na, "Stop Loss", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2)
+plot(show_trade_lines and strategy.position_size != 0 ? curr_tp : na, "Take Profit (1:10 RR)", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2)
+plot(show_trade_lines and strategy.position_size != 0 ? curr_entry : na, "Entry Price", color=color.new(color.blue, 0), style=plot.style_linebr, linewidth=1)
+plot(show_trade_lines ? (strategy.position_size > 0 ? be_line_buy : be_line_sell) : na, "BE Trigger (+2.0R)", color=color.new(color.orange, 0), style=plot.style_circles, linewidth=1)
+
+// Session Background
+bgcolor(show_session_bg and in_session ? color.new(color.blue, 96) : na, title="Active Trading Session")
+
+// Prominent BUY and SELL Signal Markers
+plotshape(show_markers and buy_signal, title="AK BUY Signal", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.normal, text="BUY")
+plotshape(show_markers and sell_signal, title="AK SELL Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, text="SELL")
+
+// Sweep Detection Markers
+plotshape(show_markers and buy_sweep, title="HTF Buy Sweep", style=shape.diamond, location=location.belowbar, color=color.teal, size=size.tiny)
+plotshape(show_markers and sell_sweep, title="HTF Sell Sweep", style=shape.diamond, location=location.abovebar, color=color.maroon, size=size.tiny)
+
+//=============================================================================
+// 9. REAL-TIME STRATEGY PERFORMANCE DASHBOARD
+//=============================================================================
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(#131722, 10), border_color=color.new(#363a45, 0), border_width=1)
+
+if show_dashboard and barstate.islast
+    total_trades = strategy.closedtrades
+    win_trades   = strategy.wintrades
+    loss_trades  = strategy.losstrades
+    win_rate     = total_trades > 0 ? (win_trades / total_trades) * 100.0 : 0.0
+    net_profit   = strategy.netprofit
+    profit_pct   = strategy.initial_capital > 0 ? (net_profit / strategy.initial_capital) * 100.0 : 0.0
+    
+    // Status text
+    status_str = "WAITING"
+    status_col = color.gray
+    if strategy.position_size > 0
+        status_str := sl_at_be ? "LONG (BE SECURED)" : "LONG (IN RISK)"
+        status_col := color.green
+    else if strategy.position_size < 0
+        status_str := sl_at_be ? "SHORT (BE SECURED)" : "SHORT (IN RISK)"
+        status_col := color.red
+    else if armed_buy
+        status_str := "ARMED BUY (" + str.tostring(watch_counter) + "/" + str.tostring(watch_window) + ")"
+        status_col := color.teal
+    else if armed_sell
+        status_str := "ARMED SELL (" + str.tostring(watch_counter) + "/" + str.tostring(watch_window) + ")"
+        status_col := color.maroon
+
+    // Render cells
+    table.cell(dash, 0, 0, "AK Forex Strategy", text_color=color.white, text_size=size.small, bgcolor=color.new(#2962ff, 20))
+    table.cell(dash, 1, 0, "1:10 RR Spec", text_color=color.white, text_size=size.small, bgcolor=color.new(#2962ff, 20))
+    
+    table.cell(dash, 0, 1, "Status", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 1, status_str, text_color=status_col, text_size=size.small)
+    
+    table.cell(dash, 0, 2, "Closed Trades", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(total_trades), text_color=color.white, text_size=size.small)
+    
+    table.cell(dash, 0, 3, "Win Rate", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(win_rate, "#.1") + "%", text_color=win_rate >= 10.0 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(dash, 0, 4, "Net Profit", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 4, (net_profit >= 0 ? "+" : "") + str.tostring(net_profit, "#.2") + " (" + str.tostring(profit_pct, "#.1") + "%)", text_color=net_profit >= 0 ? color.green : color.red, text_size=size.small)
+               
+    table.cell(dash, 0, 5, "Reward-to-Risk", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 5, "1:" + str.tostring(rr_ratio, "#.1") + " RR", text_color=color.white, text_size=size.small)
+    
+    table.cell(dash, 0, 6, "Breakeven", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 6, "+" + str.tostring(be_r, "#.1") + "R Target", text_color=color.white, text_size=size.small)
+    
+    table.cell(dash, 0, 7, "Session Filter", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 7, use_session ? "07:00-18:00 UTC" : "24H (Disabled)", text_color=in_session ? color.green : color.orange, text_size=size.small)

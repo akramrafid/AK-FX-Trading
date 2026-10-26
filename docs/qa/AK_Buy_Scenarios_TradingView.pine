@@ -1,0 +1,288 @@
+//@version=6
+// AK Buy Scenarios 1-2: the 1-minute buy strategy of BUY_STRATEGY_PROMPT.md with the Mission Impossible 3-run,
+// for checking trades on TradingView (FXCM USDCAD, 1m chart). engine/buy_scenarios.py and engine/three_run.py
+// are the source of truth for the backtest and the MT4 bridge; this script applies the same rules to the chart.
+// - HTF (5m or 15m, closed candles only): bearish X, then bullish Y with an equal low (B1) or a lower low (B2).
+//   The setup is armed from Y's close for "Setup expiry" HTF candles.
+// - 1m: the doc's 3-run detector (doji = body <= 5% of the range, the doc's doji rules). A bullish run whose 1st
+//   candle (doji or bullish) is at or below the prior bearish run's low fires once, when it counts 3.
+//   The 1st candle opens at or after Y's close and stays the run's lowest.
+// - BUY at the signal bar's close (process_orders_on_close, the spec's ENTRY_FILL = signal_close).
+//   SL = 1st candle's low - 1 point, TP = entry + 10 x risk, SL/TP only. No spread is modelled here, and
+//   TradingView orders an SL and a TP touched in one bar by its own intrabar model, not SL first.
+// - Margin 0.05% (1:2000, the Exness account's leverage) so the tester never blocks 1%-risk position sizes.
+strategy("AK Buy Scenarios 1-2", overlay=true, initial_capital=5000, process_orders_on_close=true, pyramiding=100, close_entries_rule="ANY", margin_long=0.05, margin_short=0.05, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
+
+//=============================================================================
+// 1. INPUTS (BUY_STRATEGY_PROMPT.md §8; trader decisions 2026-10-26)
+//=============================================================================
+grp_risk = "1. Risk & Reward"
+rr_ratio = input.float(10.0, "Reward-to-Risk (1:X)", minval=0.5, step=0.5, group=grp_risk)
+risk_pct = input.float(1.0, "Risk % of balance per trade", minval=0.1, maxval=10.0, step=0.1, group=grp_risk)
+max_open = input.int(0, "Max open positions (0 = no limit)", minval=0, group=grp_risk)
+
+grp_scen = "2. Scenarios"
+use_s1 = input.bool(true, "B1: HTF equal low", group=grp_scen)
+use_s2 = input.bool(true, "B2: HTF sweep low", group=grp_scen)
+
+grp_htf = "3. Higher timeframe"
+use_m5           = input.bool(true, "Check 5m", group=grp_htf)
+use_m15          = input.bool(true, "Check 15m", group=grp_htf)
+equal_low_mode   = input.string("low", "Equal-low comparison", options=["low", "body", "either"], group=grp_htf, tooltip="low = true lows (the default). body / either need the trader's approval.")
+htf_eq_tol_pts   = input.int(0, "HTF equal-low tolerance (points)", minval=0, group=grp_htf)
+expiry_bars      = input.int(3, "Setup expiry (HTF candles after Y closes)", minval=1, group=grp_htf)
+invalidate_below = input.bool(false, "Cancel a setup when a 1m candle closes below the HTF low", group=grp_htf)
+
+grp_ltf = "4. 1-minute 3-run"
+doji_pct       = input.float(5.0, "Doji: body <= % of the range", minval=0.0, maxval=99.0, step=0.5, group=grp_ltf)
+doji_counting  = input.string("doc_exact", "Doji counting", options=["doc_exact", "every_doji_counts"], group=grp_ltf)
+max_doji       = input.int(2, "Max dojis in a run", minval=0, maxval=2, group=grp_ltf)
+ltf_eq_tol_pts = input.int(0, "Prior-low tolerance (points)", minval=0, group=grp_ltf)
+first_lowest   = input.bool(true, "1st candle stays the run's lowest", group=grp_ltf)
+after_htf      = input.bool(true, "Run starts at or after Y's close", group=grp_ltf)
+sl_buffer_pts  = input.int(1, "SL buffer below the 1st candle's low (points)", minval=0, group=grp_ltf)
+near_htf_pips  = input.float(0.0, "1st candle within X pips of the HTF low (0 = off)", minval=0.0, step=0.1, group=grp_ltf)
+max_gap_min    = input.int(5, "Max gap between 1m candles (minutes)", minval=1, group=grp_ltf)
+
+grp_session = "5. Session"
+use_session   = input.bool(true, "Session filter", group=grp_session)
+session_hours = input.session("0700-2100:23456", "Session (UTC): London, London-NY, NY", group=grp_session)
+
+grp_display = "6. Display"
+show_boxes  = input.bool(true, "Risk / reward boxes", group=grp_display)
+show_labels = input.bool(true, "Scenario, run, prior-low and HTF labels", group=grp_display)
+box_bars    = input.int(60, "Box width (bars)", minval=5, maxval=400, group=grp_display)
+
+if not (timeframe.isminutes and timeframe.multiplier == 1) and barstate.islast
+    runtime.error("AK Buy Scenarios run on the 1-minute chart. Switch the chart to 1m.")
+
+//=============================================================================
+// 2. PRICES AS INTEGER POINTS
+//=============================================================================
+PIP_PTS    = 10  // 5-digit (and 3-digit JPY) quotes: 1 pip = 10 points
+RUN_LENGTH = 3
+pts(float p) => math.round(p / syminfo.mintick)
+near_tol = math.round(near_htf_pips * PIP_PTS)
+
+// 1 = bullish, -1 = bearish, 0 = doji: body <= doji_pct % of the range (a zero-range candle is a doji).
+kind(float o, float h, float l, float c) =>
+    body = pts(c) - pts(o)
+    math.abs(body) * 100 <= doji_pct * (pts(h) - pts(l)) ? 0 : body > 0 ? 1 : -1
+
+// 0 = none, 1 = equal (within the tolerance), 2 = Y lower.
+compareLows(int diff) =>
+    math.abs(diff) <= htf_eq_tol_pts ? 1 : diff < -htf_eq_tol_pts ? 2 : 0
+
+// 0 = none, 1 = EQUAL_LOW, 2 = SWEEP_LOW. X must be bearish and Y bullish (BUY_STRATEGY_PROMPT.md §4.2).
+bottomPattern(float xo, float xh, float xl, float xc, float yo, float yh, float yl, float yc) =>
+    int res = 0
+    if kind(xo, xh, xl, xc) == -1 and kind(yo, yh, yl, yc) == 1
+        byLow  = compareLows(pts(yl) - pts(xl))
+        byBody = compareLows(pts(yo) - pts(xc))
+        res := equal_low_mode == "low" ? byLow : equal_low_mode == "body" ? byBody : byLow != 0 ? byLow : byBody
+    res
+
+//=============================================================================
+// 3. HTF SETUPS FROM CLOSED 5m / 15m CANDLES (no repainting: [1] = Y, [2] = X)
+//=============================================================================
+type Setup
+    string tf
+    int    ptype
+    int    yTime
+    float  setupLow
+    int    tConf
+    int    tExp
+
+var array<Setup> setups = array.new<Setup>()
+
+[m15_yo, m15_yh, m15_yl, m15_yc, m15_yt, m15_xo, m15_xh, m15_xl, m15_xc, m15_xt] = request.security(syminfo.tickerid, "15", [open[1], high[1], low[1], close[1], time[1], open[2], high[2], low[2], close[2], time[2]], lookahead = barmerge.lookahead_on)
+[m5_yo, m5_yh, m5_yl, m5_yc, m5_yt, m5_xo, m5_xh, m5_xl, m5_xc, m5_xt] = request.security(syminfo.tickerid, "5", [open[1], high[1], low[1], close[1], time[1], open[2], high[2], low[2], close[2], time[2]], lookahead = barmerge.lookahead_on)
+
+armSetup(string tf, int tfMs, float yo, float yh, float yl, float yc, int yt, float xo, float xh, float xl, float xc, int xt) =>
+    if not na(yt) and not na(xt) and yt - xt == tfMs
+        p = bottomPattern(xo, xh, xl, xc, yo, yh, yl, yc)
+        if p != 0
+            tConf    = yt + tfMs
+            setupLow = math.min(xl, yl)
+            array.push(setups, Setup.new(tf, p, yt, setupLow, tConf, tConf + expiry_bars * tfMs))
+            if show_labels
+                label.new(tConf, setupLow, (p == 1 ? "EQ LOW " : "SWEEP ") + tf, xloc=xloc.bar_time, style=label.style_label_up, color=color.new(color.gray, 25), textcolor=color.white, size=size.small)
+
+new15 = ta.change(time("15")) != 0
+new5  = ta.change(time("5")) != 0
+if barstate.isconfirmed and use_m15 and new15
+    armSetup("15m", 15 * 60000, m15_yo, m15_yh, m15_yl, m15_yc, m15_yt, m15_xo, m15_xh, m15_xl, m15_xc, m15_xt)
+if barstate.isconfirmed and use_m5 and new5
+    armSetup("5m", 5 * 60000, m5_yo, m5_yh, m5_yl, m5_yc, m5_yt, m5_xo, m5_xh, m5_xl, m5_xc, m5_xt)
+
+nowMs = time_close
+if barstate.isconfirmed and array.size(setups) > 0
+    for i = array.size(setups) - 1 to 0
+        s = array.get(setups, i)
+        if s.tExp < nowMs or (invalidate_below and pts(close) < pts(s.setupLow))
+            array.remove(setups, i)
+
+//=============================================================================
+// 4. MISSION IMPOSSIBLE 3-RUN (Mission_Impossible_Pine_Script.docx; engine/three_run.py rules a-e)
+//=============================================================================
+type Run
+    int        dir       = 0  // 1 = bullish, -1 = bearish, 0 = no run yet
+    int        count     = 0
+    float      lo        = na // range of every member, merged dojis included
+    float      hi        = na
+    float      firstLow  = na
+    float      firstHigh = na
+    int        firstTime = na
+    bool       eligible  = false
+    bool       fired     = false
+    array<int> bars
+    array<int> kinds
+
+newRun() =>
+    Run.new(bars = array.new<int>(), kinds = array.new<int>())
+
+var Run run   = newRun()
+var Run prior = na
+var array<int>   pendBars  = array.new<int>()
+var array<float> pendLows  = array.new<float>()
+var array<float> pendHighs = array.new<float>()
+var array<int>   pendTimes = array.new<int>()
+var int lastBarTime = na
+
+clearPending() =>
+    array.clear(pendBars)
+    array.clear(pendLows)
+    array.clear(pendHighs)
+    array.clear(pendTimes)
+
+addPending() =>
+    array.push(pendBars, bar_index)
+    array.push(pendLows, low)
+    array.push(pendHighs, high)
+    array.push(pendTimes, time)
+
+// Merge the pending dojis and this candle into the run's range and members.
+absorb(Run r, int k) =>
+    n = array.size(pendBars)
+    if n > 0
+        for i = 0 to n - 1
+            r.lo := na(r.lo) ? array.get(pendLows, i) : math.min(r.lo, array.get(pendLows, i))
+            r.hi := na(r.hi) ? array.get(pendHighs, i) : math.max(r.hi, array.get(pendHighs, i))
+            array.push(r.bars, array.get(pendBars, i))
+            array.push(r.kinds, 0)
+    r.lo := na(r.lo) ? low : math.min(r.lo, low)
+    r.hi := na(r.hi) ? high : math.max(r.hi, high)
+    array.push(r.bars, bar_index)
+    array.push(r.kinds, k)
+    clearPending()
+
+int fireDir = 0  // the run that fired on this bar: 1 bullish, -1 bearish
+if barstate.isconfirmed
+    if not na(lastBarTime) and time - lastBarTime > max_gap_min * 60000
+        run := newRun()  // a feed outage: no run spans the gap
+        prior := na
+        clearPending()
+    lastBarTime := time
+    k = kind(open, high, low, close)
+    nPend = array.size(pendBars)
+    if k == 0
+        if run.dir != 0 and run.count + nPend + 1 == RUN_LENGTH  // (a) the doji completes the run
+            absorb(run, 0)
+            run.count := RUN_LENGTH
+            if run.eligible and not run.fired
+                run.fired := true
+                fireDir := run.dir
+        else if nPend == 2  // (b) a third doji drops the pending dojis and itself
+            clearPending()
+        else  // (c) the doji waits
+            addPending()
+    else if k == run.dir  // (d) continuation: pending dojis join the range, and count only with every_doji_counts
+        before = run.count
+        run.count := run.count + 1 + (doji_counting == "every_doji_counts" ? nPend : 0)
+        absorb(run, k)
+        if before < RUN_LENGTH and run.count >= RUN_LENGTH and run.eligible and not run.fired
+            run.fired := true
+            fireDir := run.dir
+    else  // (e) a new run led by the pending dojis; eligibility is tested on its 1st candle
+        nr = newRun()
+        nr.dir       := k
+        nr.count     := nPend + 1
+        nr.firstLow  := nPend > 0 ? array.get(pendLows, 0) : low
+        nr.firstHigh := nPend > 0 ? array.get(pendHighs, 0) : high
+        nr.firstTime := nPend > 0 ? array.get(pendTimes, 0) : time
+        hadRun = run.dir != 0
+        nr.eligible  := hadRun and (k == 1 ? pts(nr.firstLow) <= pts(run.lo) + ltf_eq_tol_pts : pts(nr.firstHigh) >= pts(run.hi) - ltf_eq_tol_pts)
+        absorb(nr, k)
+        if hadRun
+            prior := run
+        else
+            prior := na
+        run := nr
+        if run.count >= RUN_LENGTH and run.eligible
+            run.fired := true
+            fireDir := run.dir
+
+//=============================================================================
+// 5. BUY ON A BULLISH 3-RUN THAT MATCHES AN ARMED SETUP
+//=============================================================================
+// Several setups may match: the 15m one labels the trade before the 5m one, then the latest confirmation.
+int best = -1
+string matchIds = ""
+if fireDir == 1 and array.size(setups) > 0
+    for i = 0 to array.size(setups) - 1
+        s = array.get(setups, i)
+        nearOk = near_tol == 0 or math.abs(pts(run.firstLow) - pts(s.setupLow)) <= near_tol
+        if (not after_htf or run.firstTime >= s.tConf) and nowMs <= s.tExp and nearOk
+            matchIds := matchIds + (matchIds == "" ? "" : " | ") + s.tf + " Y " + str.format_time(s.yTime, "MM-dd HH:mm", "UTC") + " UTC"
+            if best == -1
+                best := i
+            else
+                b = array.get(setups, best)
+                if (s.tf == "15m" and b.tf == "5m") or (s.tf == b.tf and s.tConf > b.tConf)
+                    best := i
+
+inSession = not use_session or not na(time(timeframe.period, session_hours, "UTC"))
+if best != -1
+    s        = array.get(setups, best)
+    scenario = s.ptype == 1 ? 1 : 2
+    dojis    = 0
+    for j = 0 to array.size(run.kinds) - 1
+        dojis += array.get(run.kinds, j) == 0 ? 1 : 0
+    enabled  = scenario == 1 ? use_s1 : use_s2
+    roomOk   = max_open == 0 or strategy.opentrades < max_open
+    sl       = (pts(run.firstLow) - sl_buffer_pts) * syminfo.mintick
+    entry    = close
+    risk     = entry - sl
+    if first_lowest and pts(run.lo) < pts(run.firstLow)
+        log.info("B{0} skipped: 1st candle is not the run's lowest ({1})", scenario, matchIds)
+    else if dojis > max_doji
+        log.info("B{0} skipped: {1} dojis in the run ({2})", scenario, dojis, matchIds)
+    else if not enabled
+        log.info("B{0} skipped: scenario disabled ({1})", scenario, matchIds)
+    else if not inSession
+        log.info("B{0} skipped: outside session ({1})", scenario, matchIds)
+    else if not roomOk
+        log.info("B{0} skipped: position limit ({1})", scenario, matchIds)
+    else if risk > 0
+        tp      = entry + rr_ratio * risk
+        balance = strategy.initial_capital + strategy.netprofit
+        pv      = (not na(syminfo.pointvalue) and syminfo.pointvalue > 0) ? syminfo.pointvalue : 1.0
+        qty     = balance * risk_pct / 100.0 / (risk * pv)
+        id      = "B" + str.tostring(scenario) + "-" + str.tostring(bar_index)
+        strategy.entry(id, strategy.long, qty=qty)
+        strategy.exit("x" + id, from_entry=id, stop=sl, limit=tp)
+        array.remove(setups, best)  // one trade per setup
+        if show_boxes
+            box.new(bar_index, entry, bar_index + box_bars, sl, border_color=color.new(color.fuchsia, 60), bgcolor=color.new(color.fuchsia, 80))
+            box.new(bar_index, tp, bar_index + box_bars, entry, border_color=color.new(color.teal, 60), bgcolor=color.new(color.aqua, 80), text="B" + str.tostring(scenario), text_color=color.teal, text_halign=text.align_left, text_valign=text.align_bottom)
+        if show_labels
+            label.new(bar_index, sl, "B" + str.tostring(scenario) + " BUY " + str.tostring(entry, format.mintick), style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small, tooltip=matchIds)
+            for j = 0 to array.size(run.bars) - 1
+                isDoji = array.get(run.kinds, j) == 0
+                label.new(array.get(run.bars, j), low, str.tostring(j + 1), yloc=yloc.belowbar, style=label.style_none, textcolor=isDoji ? color.gray : color.blue, size=size.small)
+            if not na(prior)
+                line.new(array.get(prior.bars, 0), prior.lo, bar_index, prior.lo, color=color.orange, style=line.style_dashed)
+    else
+        log.info("B{0} skipped: close at or below the SL ({1})", scenario, matchIds)
+
+bgcolor(use_session and inSession ? color.new(color.blue, 97) : na, title="Trading session")

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m unittest discover -s tests -v)",
+      "Bash(python -m orchestrator doctor)",
+      "Bash(python -m orchestrator.cli --help)",
+      "Bash(python -m orchestrator.cli frontend-check --area all)",
+      "Bash(npm run lint)"
+    ]
+  }
+}

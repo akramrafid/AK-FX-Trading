@@ -125,6 +125,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** All §11 cases (T1-T6, N1-N11, E1-E3, replay, mutation) pass; existing modes unchanged.
   - **Verify:** python -m unittest discover -s tests -p "test_sell_scenarios.py"
 
+- [x] **P1-C02** ★ 1-Minute Buy Scenarios 1-2 & Mission Impossible 3-Run (change request 2026-10-26)
+  - **Owner:** senior-system-architect
+  - **Deps:** P1-C01
+  - **Files:** engine/three_run.py, engine/buy_scenarios.py, engine/ak_scenarios.py, config.py, tests/test_three_run.py, tests/test_buy_scenarios.py
+  - **Do:** Implement BUY_STRATEGY_PROMPT.md as the opt-in mode `buy_scenarios`: a closed M5/M15 equal low or sweep low arms a setup for 3 HTF candles; the doc's 3-run detector (doji = body <= 5% of the range, doc_exact doji counting) gives the 1m trigger; the 1st candle opens at or after t_conf and stays the run's lowest; SL = 1st candle low - 1 point; §8 parameters as config.py constants. Mode `ak_scenarios` runs sells and buys together with no hedging and a same-bar conflict skip.
+  - **Accept:** All §12 cases (B1-B9, N1-N12, E1-E3, replay, mutation) pass; the sell engine is unchanged (sell-only parity test).
+  - **Verify:** python -m unittest discover -s tests -p "test_buy_scenarios.py"
+
 ---
 
 ## Phase 2 — Architecture & Backtesting
@@ -185,6 +193,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Accept:** Report with per-scenario and total metrics, spread sensitivity, position-limit comparison and 10 sample trades; journal CSVs written.
   - **Verify:** python scripts/run_sell_scenarios_backtest.py
 
+- [x] **P2-C02** Buy Scenarios Backtest & Sell + Buy Report (change request 2026-10-26)
+  - **Owner:** senior-backend-engineer
+  - **Deps:** P1-C02, P2-C01
+  - **Files:** engine/scenarios_backtest.py, scripts/run_buy_scenarios_backtest.py, docs/qa/buy-scenarios-backtest-report.md, docs/qa/buy-scenarios-journal-spread-0.0.csv, docs/qa/buy-scenarios-journal-spread-0.5.csv, docs/qa/ak-scenarios-journal-spread-0.0.csv, docs/qa/ak-scenarios-journal-spread-0.5.csv
+  - **Do:** Replay the recorded USDCAD bars through the same engines with one book for both sides: buys fill at the signal bar's close plus the spread (the ask) and exit at the bid, SL first on same-bar touches, SL/TP only, 1% of balance. Report per buy scenario and total, doji counts, spread sensitivity, the position-limit comparison, sell + buy under no hedging, and 10 sample buys in UTC and UTC+6.
+  - **Accept:** Report and journal CSVs written; a sell-only run through the shared runner equals run_sell_backtest.
+  - **Verify:** python scripts/run_buy_scenarios_backtest.py
+
 ---
 
 ## Phase 3 — MT4 Execution Bridge
@@ -244,6 +260,14 @@ Each review-only gate files Critical/High findings as new `-F` tasks and stays u
   - **Do:** Select the engine with STRATEGY_MODE=sell_scenarios in the bridge and the desk API; price the TP from the live bid the EA writes to DWX_Account.txt at send time, sending nothing without a fresh quote or when the ask is at or above the SL; journal signals and skips to audit_logs; MAX_OPEN_TRADES=0 means no limit; Pine v5 port for chart checks.
   - **Accept:** Bridge tests for TP-from-bid (EA account format), NO_LIVE_QUOTE and the SL-not-above-ask rejection pass; no post-entry modifications in this mode.
   - **Verify:** python -m unittest discover -s tests -p "test_sell_scenarios.py"
+
+- [x] **P3-C02** Buy Scenarios Live Wiring, Live Guardrail Inputs & TradingView Port (change request 2026-10-26)
+  - **Owner:** senior-integration-engineer
+  - **Deps:** P1-C02, P3-C01
+  - **Files:** bridge/executor.py, bridge/day_start.py, bridge/dwx_client.py, api/server.py, plan.md, .env.example, docs/qa/AK_Buy_Scenarios_TradingView.pine
+  - **Do:** Select the engines with STRATEGY_MODE=buy_scenarios or ak_scenarios in the bridge and the desk API; price the buy TP from the live ask and send nothing when the bid is at or below the SL; count open positions by side from the EA's order list (unknown = neither side trades); feed the guardrails the live daily loss (day-start balance kept in daily_metrics) and the live spread; Pine v6 port with the risk/reward boxes.
+  - **Accept:** Bridge tests for TP-from-ask, the SL-not-below-bid rejection, the daily loss trip (also after a restart) and the spread ceiling pass; no post-entry modifications in these modes.
+  - **Verify:** python -m unittest discover -s tests -p "test_buy_scenarios.py"
 
 ---
 

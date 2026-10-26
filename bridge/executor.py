@@ -18,7 +18,15 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from bridge.dwx_client import DWXClient, ExecutionReport, OrderType, TradeCommand
+from bridge.day_start import DayStartBalances
+from bridge.dwx_client import (
+    DWXClient,
+    ExecutionReport,
+    OrderType,
+    TradeCommand,
+    account_spread_pips,
+    open_positions_by_side,
+)
 from bridge.sizing import (
     PositionSizer,
     SizingResult,
@@ -49,6 +57,8 @@ from config import (
 )
 from database.sqlite_manager import TradingDatabase
 from engine.models import Candle, Direction, TradeSignal
+from engine.ak_scenarios import AkScenariosEngine, no_hedging_params
+from engine.buy_scenarios import BuyScenarioEngine, BuyScenarioParams
 from engine.rule_engine import RuleEngine
 from engine.sell_scenarios import SellScenarioEngine, SellScenarioParams
 from risk.guardrails import RiskGuardrails
@@ -66,6 +76,30 @@ TIMEFRAME_DELTAS: Dict[str, timedelta] = {
     "D1": timedelta(days=1),
 }
 
+# Strategy modes that exit at SL or TP only: no break-even, trailing or partial close.
+SCENARIO_MODES = ("sell_scenarios", "buy_scenarios", "ak_scenarios")
+# The EA rewrites DWX_Account.txt every second, so a read can catch it half-written: read it again shortly.
+SNAPSHOT_READ_ATTEMPTS = 3
+SNAPSHOT_RETRY_SECONDS = 0.05
+# An order this bridge sent counts as open on its side until the EA's order list shows it.
+RECENT_ORDER_SECONDS = 60.0
+
+
+def _account_value(acc_info: Any, key: str) -> Optional[Decimal]:
+    """A positive balance or equity figure from the account snapshot the EA writes, or None."""
+    if not isinstance(acc_info, dict):
+        return None
+    try:
+        value = Decimal(str(acc_info[key]))
+    except (KeyError, ArithmeticError, ValueError, TypeError):
+        return None
+    return value if value.is_finite() and value > 0 else None
+
+
+def _account_id(acc_info: Any) -> str:
+    """The MT4 account number in the EA's account snapshot, or "" when it is missing."""
+    return str(acc_info.get("account_number", "")).strip() if isinstance(acc_info, dict) else ""
+
 
 def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
     """Generates a deterministic 32-bit signed integer magic number for MT4.
@@ -79,23 +113,64 @@ def generate_mt4_magic_number(dt: datetime, sequence: int = 1) -> int:
     return int(base % 2_000_000_000)
 
 
+def _journal_sink(
+    db: Optional[TradingDatabase], symbol: str, source: str, prefix: str
+) -> Optional[Callable[[Dict[str, Any]], None]]:
+    """audit_logs writer for a scenario engine: <prefix>_SIGNAL, <prefix>_SKIPPED, or the record's own event."""
+    if db is None:
+        return None
+
+    def sink(record: Dict[str, Any]) -> None:
+        event = {"SIGNAL": f"{prefix}_SIGNAL", "SKIPPED": f"{prefix}_SKIPPED"}.get(record["event"], record["event"])
+        db.log_audit_event(event, source, {"symbol": symbol, **record})
+
+    return sink
+
+
 def build_sell_scenario_engine(cfg: Any, symbol: str, db: Optional[TradingDatabase] = None) -> SellScenarioEngine:
     """Sell Scenarios engine for the live bridge (STRATEGY_MODE=sell_scenarios).
 
     The session and open-position limit come from the same AppConfig as the risk guardrails.
     Every signal and skipped signal is journaled to audit_logs (plan.md §3.9).
     """
-    sink: Optional[Callable[[Dict[str, Any]], None]] = None
-    if db is not None:
-        def sink(record: Dict[str, Any]) -> None:
-            event = "SELL_SCENARIO_SIGNAL" if record["event"] == "SIGNAL" else "SELL_SCENARIO_SKIPPED"
-            db.log_audit_event(event, "sell_scenarios", {"symbol": symbol, **record})
-
     return SellScenarioEngine(
         params=SellScenarioParams.from_app_config(cfg, symbol),
         symbol=symbol,
-        event_sink=sink,
+        event_sink=_journal_sink(db, symbol, "sell_scenarios", "SELL_SCENARIO"),
     )
+
+
+def build_buy_scenario_engine(cfg: Any, symbol: str, db: Optional[TradingDatabase] = None) -> BuyScenarioEngine:
+    """Buy Scenarios engine for the live bridge (STRATEGY_MODE=buy_scenarios).
+
+    The session and open-position limit come from the same AppConfig as the risk guardrails.
+    Every signal and skipped signal is journaled to audit_logs (plan.md §3.9).
+    """
+    return BuyScenarioEngine(
+        params=BuyScenarioParams.from_app_config(cfg, symbol),
+        symbol=symbol,
+        event_sink=_journal_sink(db, symbol, "buy_scenarios", "BUY_SCENARIO"),
+    )
+
+
+def build_ak_scenarios_engine(cfg: Any, symbol: str, db: Optional[TradingDatabase] = None) -> AkScenariosEngine:
+    """Sell and buy scenarios together for the live bridge (STRATEGY_MODE=ak_scenarios).
+
+    Never a buy and a sell open at once: the BridgeExecutor that runs the engine counts the open
+    positions by side (open_positions_by_side), and while they are unknown neither side trades.
+    A sell and a buy on the same bar are journaled as SAME_BAR_CONFLICT and neither is sent.
+    """
+    sell = SellScenarioEngine(
+        params=no_hedging_params(SellScenarioParams.from_app_config(cfg, symbol)),
+        symbol=symbol,
+        event_sink=_journal_sink(db, symbol, "sell_scenarios", "SELL_SCENARIO"),
+    )
+    buy = BuyScenarioEngine(
+        params=no_hedging_params(BuyScenarioParams.from_app_config(cfg, symbol)),
+        symbol=symbol,
+        event_sink=_journal_sink(db, symbol, "buy_scenarios", "BUY_SCENARIO"),
+    )
+    return AkScenariosEngine(sell=sell, buy=buy, event_sink=_journal_sink(db, symbol, "ak_scenarios", "AK_SCENARIOS"))
 
 
 @dataclass
@@ -188,6 +263,9 @@ class BridgeExecutor:
 
         # Core Rule Engine (strictly shared between backtester & live bridge)
         self.rule_engine = rule_engine or RuleEngine(swing_lookback=20)
+        # ak_scenarios' no-hedging rule counts open positions through this bridge (MT4's list + its own orders).
+        if getattr(self.rule_engine, "position_counter", False) is None:
+            self.rule_engine.position_counter = self.open_positions_by_side
         self.position_sizer = position_sizer or PositionSizer(default_risk_pct=risk_pct)
         self.min_lot = getattr(self.position_sizer, "min_lot", Decimal("0.01"))
         self.max_lot = getattr(self.position_sizer, "max_lot", Decimal("50.00"))
@@ -209,6 +287,7 @@ class BridgeExecutor:
         self.processed_signal_keys: Set[str] = set()
         self.order_records: List[BridgeOrderRecord] = []
         self.active_trades: Dict[int, ActiveBridgeTrade] = {}
+        self._day_starts = DayStartBalances(db)  # the daily loss limit's baseline
         self._running = False
         self._magic_seq = 0
 
@@ -293,6 +372,7 @@ class BridgeExecutor:
         """
         # 0. Sync live spread from DWX account info if available
         acc_info = self.dwx_client.read_account_info()
+        self._note_day_start(acc_info)
         if isinstance(acc_info, dict):
             live_spread = None
             if "pairs" in acc_info and isinstance(acc_info["pairs"], dict) and self.symbol in acc_info["pairs"]:
@@ -396,6 +476,7 @@ class BridgeExecutor:
         if m1_file.exists():
             return self.step_multitimeframe()
 
+        self._note_day_start(self.dwx_client.read_account_info())
         closed_bars = self.dwx_client.read_closed_bars(self.symbol, self.timeframe)
         if not closed_bars:
             return None
@@ -440,6 +521,47 @@ class BridgeExecutor:
                         dispatched_record = record
 
         return dispatched_record
+
+    def _note_day_start(self, acc_info: Any) -> None:
+        """Record the day's starting balance at the first account reading of each UTC day."""
+        balance = _account_value(acc_info, "balance")
+        if balance is not None:
+            self._day_starts.balance_at_start(balance, _account_id(acc_info))
+
+    def _account_snapshot(self, fresh: bool = False) -> Any:
+        """The EA's account snapshot, read again when caught half-written; with fresh=True, None when stale."""
+        if fresh:
+            try:
+                if time.time() - self.dwx_client.account_file.stat().st_mtime > self.balance_max_age_seconds:
+                    return None
+            except (OSError, TypeError, ValueError):
+                return None
+        acc_info = self.dwx_client.read_account_info()
+        for _ in range(SNAPSHOT_READ_ATTEMPTS - 1):
+            if isinstance(acc_info, dict):
+                break
+            time.sleep(SNAPSHOT_RETRY_SECONDS)
+            acc_info = self.dwx_client.read_account_info()
+        return acc_info
+
+    def open_positions_by_side(self) -> Optional[Tuple[int, int]]:
+        """(buys, sells) open on this symbol for ak_scenarios' no-hedging rule; None when unknown.
+
+        A fresh DWX_Account.txt order list, plus the orders this bridge sent in the last
+        RECENT_ORDER_SECONDS that the list does not show yet (the EA rewrites it about once a second).
+        """
+        acc_info = self._account_snapshot(fresh=True)
+        counts = open_positions_by_side(acc_info, self.symbol)
+        if counts is None:
+            return None
+        listed = {o["ticket"] for o in acc_info["orders"] if isinstance(o, dict) and "ticket" in o}
+        since = datetime.now(timezone.utc) - timedelta(seconds=RECENT_ORDER_SECONDS)
+        unlisted = [
+            r.direction
+            for r in self.order_records
+            if r.status in ("PENDING", "FILLED", "UNCONFIRMED") and r.dispatched_at >= since and r.ticket not in listed
+        ]
+        return counts[0] + unlisted.count(Direction.BUY), counts[1] + unlisted.count(Direction.SELL)
 
     def _reject_signal(
         self,
@@ -607,8 +729,8 @@ class BridgeExecutor:
             # distance = |quote - SL|. Spread is inherent in live quote.
             live_quote: Optional[Decimal] = None
             quotes = self.dwx_client.read_market_quote(self.symbol)
-            # Sell Scenarios price the TP from the fill, so they need the live quote the EA writes to
-            # DWX_Account.txt; without a fresh one nothing is sent.
+            # Sell and buy scenarios price the TP from the fill, so they need the live quote the EA writes
+            # to DWX_Account.txt; without a fresh one nothing is sent.
             tp_from_quote = bool(getattr(self.rule_engine, "tp_from_fill", False))
             if tp_from_quote:
                 quotes = self.dwx_client.read_account_quote(self.symbol, self.balance_max_age_seconds) or quotes
@@ -623,10 +745,14 @@ class BridgeExecutor:
 
             _quote_dec, distance = calculate_r3_quote_distance(live_quote, sl_dec)
 
-            # MT4 rejects a sell whose SL is not above the ask, so such a signal sends nothing.
+            # MT4 rejects a sell whose SL is not above the ask and a buy whose SL is not below the bid,
+            # so such a signal sends nothing.
             if tp_from_quote and signal_dir == Direction.SELL and quotes[1] >= sl_dec:
                 logger.warning(f"[{self.symbol}] Ask {quotes[1]} is at or above SL {sl_dec}. Sending no order.")
                 return self._reject_signal(signal, signal_key, signal_dir, entry_dec, sl_dec, tp_dec, "SL_NOT_ABOVE_ASK")
+            if tp_from_quote and signal_dir == Direction.BUY and quotes[0] <= sl_dec:
+                logger.warning(f"[{self.symbol}] Bid {quotes[0]} is at or below SL {sl_dec}. Sending no order.")
+                return self._reject_signal(signal, signal_key, signal_dir, entry_dec, sl_dec, tp_dec, "SL_NOT_BELOW_BID")
 
             # [R4] Tick size, tick value, and per-lot loss at the stop
             # per_lot_loss = (distance / tick_size) * tick_value + COMMISSION_PER_LOT_ROUND_TURN ($7.00/lot)
@@ -695,7 +821,7 @@ class BridgeExecutor:
 
         # ── Non-Bypassable Risk Guardrail Gate ──────────────────────────
         if self.risk_guardrails is not None:
-            acc_info = self.dwx_client.read_account_info()
+            acc_info = self._account_snapshot()
             if acc_info and "orders" in acc_info:
                 live_tickets = {int(o["ticket"]) for o in acc_info["orders"] if "ticket" in o}
                 closed_tickets = [t for t in self.active_trades if t not in live_tickets]
@@ -707,15 +833,30 @@ class BridgeExecutor:
             else:
                 open_count = len([r for r in self.order_records if r.status == "FILLED"])
 
+            # Daily loss = closed P&L since the day's first balance reading + the open trades' floating P&L.
+            balance_now = _account_value(acc_info, "balance")
+            equity_now = _account_value(acc_info, "equity")
+            live_spread = account_spread_pips(acc_info, self.symbol)
+            if balance_now is None or equity_now is None or live_spread is None:
+                if self.exact_risk_sizing:
+                    logger.error(f"[{self.symbol}] No complete account snapshot for the guardrails. Sending no order.")
+                    return self._reject_signal(
+                        signal, signal_key, signal_dir, entry_dec, sl_dec, tp_dec, "ACCOUNT_SNAPSHOT_UNREADABLE"
+                    )
+                # Legacy sizing path: what the snapshot gives, otherwise the cached balance and no spread.
+                balance_now = balance_now or self.balance
+                equity_now = equity_now or balance_now
+                live_spread = live_spread if live_spread is not None else Decimal("0.0")
+            day_start = self._day_starts.balance_at_start(balance_now, _account_id(acc_info))
             account_state = AccountState(
-                starting_daily_balance=self.balance,
-                current_balance=self.balance,
-                current_equity=self.balance,
-                realized_daily_pnl=Decimal("0.00"),
-                unrealized_daily_pnl=Decimal("0.00"),
+                starting_daily_balance=day_start,
+                current_balance=balance_now,
+                current_equity=equity_now,
+                realized_daily_pnl=balance_now - day_start,
+                unrealized_daily_pnl=equity_now - balance_now,
                 open_trade_count=open_count,
                 daily_trades_count=len([r for r in self.order_records if r.status in ("FILLED", "UNCONFIRMED")]),
-                current_spread_pips=Decimal("0.0"),
+                current_spread_pips=live_spread,
                 timestamp=signal_time,
             )
             risk_result: ValidationResult = self.risk_guardrails.validate_trade(
@@ -1126,6 +1267,10 @@ def main() -> None:
         preset_name = "C1 Wick-Swap (1:5 R:R, BE @ 2R, C1 SL)"
     elif mode_str == "sell_scenarios":
         preset_name = "Sell Scenarios 1-4 (1m entry on M5/M15 setup, 1:10 R:R, SL/TP only)"
+    elif mode_str == "buy_scenarios":
+        preset_name = "Buy Scenarios 1-2 (1m 3-run on M5/M15 setup, 1:10 R:R, SL/TP only)"
+    elif mode_str == "ak_scenarios":
+        preset_name = "AK Scenarios: Sell 1-4 + Buy 1-2, no hedging (1:10 R:R, SL/TP only)"
     else:
         preset_name = "Institutional Preset"
 
@@ -1149,6 +1294,10 @@ def main() -> None:
             )
         elif mode_str == "sell_scenarios":
             engine = build_sell_scenario_engine(cfg, sym, db)
+        elif mode_str == "buy_scenarios":
+            engine = build_buy_scenario_engine(cfg, sym, db)
+        elif mode_str == "ak_scenarios":
+            engine = build_ak_scenarios_engine(cfg, sym, db)
         else:
             engine = RuleEngine.institutional_preset(
                 symbol=sym,
@@ -1175,9 +1324,8 @@ def main() -> None:
             risk_percent=Decimal(str(getattr(cfg, "risk_percent", RISK_PERCENT))),
             commission_per_lot_round_turn=Decimal(str(getattr(cfg, "commission_per_lot_round_turn", COMMISSION_PER_LOT_ROUND_TURN))),
             risk_deviation_tolerance_pct=getattr(cfg, "risk_deviation_tolerance_pct", RISK_DEVIATION_TOLERANCE_PCT),
-            # Sell Scenarios exit at SL or TP only: no break-even, trailing or partial close.
             allow_post_entry_modifications=(
-                False if mode_str == "sell_scenarios" else getattr(cfg, "allow_post_entry_modifications", False)
+                False if mode_str in SCENARIO_MODES else getattr(cfg, "allow_post_entry_modifications", False)
             ),
         )
         bridges.append(b)

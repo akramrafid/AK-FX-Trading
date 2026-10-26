@@ -491,7 +491,12 @@ class BridgeController:
                 from config import load_config
                 from bridge.dwx_client import DWXClient
                 from bridge.sizing import PositionSizer
-                from bridge.executor import BridgeExecutor, build_sell_scenario_engine
+                from bridge.executor import (
+                    BridgeExecutor,
+                    build_ak_scenarios_engine,
+                    build_buy_scenario_engine,
+                    build_sell_scenario_engine,
+                )
                 from engine.rule_engine import RuleEngine
                 from risk.models import RiskLimits
                 from risk.guardrails import RiskGuardrails
@@ -618,6 +623,10 @@ class BridgeController:
                         )
                     elif strat_mode == "sell_scenarios":
                         engine = build_sell_scenario_engine(cfg, sym, db)
+                    elif strat_mode == "buy_scenarios":
+                        engine = build_buy_scenario_engine(cfg, sym, db)
+                    elif strat_mode == "ak_scenarios":
+                        engine = build_ak_scenarios_engine(cfg, sym, db)
                     else:
                         engine = RuleEngine.institutional_preset(
                             symbol=sym,

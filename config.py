@@ -84,6 +84,32 @@ SELL_SESSION_START_HOUR: int = 7                        # Trader: London, London
 SELL_SESSION_END_HOUR: int = 21
 SELL_SESSION_WEEKDAYS: tuple[int, ...] = (0, 1, 2, 3, 4)  # Monday-Friday
 
+# 1-Minute Buy Scenarios 1-2 with the Mission Impossible 3-run (BUY_STRATEGY_PROMPT.md §8; trader decisions 2026-10-26)
+BUY_ENABLED_SCENARIOS: tuple[int, ...] = (1, 2)
+BUY_ENTRY_FILL: str = "signal_close"                    # Image: buy "where the candle closed"; "next_bar_open" available
+BUY_DOJI_BODY_PCT: float = 5.0                          # Doc: doji = body <= 5% of the candle's range
+BUY_MAX_DOJI_IN_RUN: int = 2                            # Doc: up to 2 dojis per run
+BUY_DOJI_COUNTING: str = "doc_exact"                    # Doc; "every_doji_counts" available
+BUY_LTF_EQ_TOL_POINTS: int = 0                          # Doc: exact price, a 1-tick miss is rejected
+BUY_EQUAL_LOW_MODE: str = "low"                         # [ASSUMPTION] true lows; "body" / "either" need approval
+BUY_HTF_EQ_TOL_POINTS: int = 0                          # [ASSUMPTION] 0 = HTF lows exactly equal
+BUY_SL_BUFFER_POINTS: int = 1                           # [ASSUMPTION] SL 1 point below the 1st candle
+BUY_FIRST_MUST_BE_LOWEST: bool = True                   # [ASSUMPTION] no run candle below the 1st candle's low
+BUY_HTF_SETUP_EXPIRY_BARS: int = 3                      # [ASSUMPTION] setup armed for 3 HTF candles
+BUY_RUN_MUST_START_AFTER_HTF: bool = True               # [ASSUMPTION] new run at/after t_conf; the prior run may be earlier
+BUY_INVALIDATE_ON_CLOSE_BELOW_HTF_LOW: bool = False     # [ASSUMPTION] optional cancel rule, off
+BUY_LTF_NEAR_HTF_LOW_PIPS: Optional[float] = None       # [ASSUMPTION] optional proximity filter, off
+BUY_MAX_TRADES_PER_SETUP: int = 1                       # [ASSUMPTION] one trade per HTF setup
+BUY_MAX_OPEN_POSITIONS: Optional[int] = None            # Trader: no limit within a side (no hedging across sides)
+BUY_SAME_BAR_SL_TP: str = "SL_FIRST"                    # [ASSUMPTION] bar data cannot order SL and TP
+BUY_MAX_1M_GAP_MINUTES: int = SELL_MAX_1M_GAP_MINUTES   # Feed outage resets the run detector
+BUY_SESSION_START_HOUR: int = SELL_SESSION_START_HOUR   # Trader: same session as the sell side
+BUY_SESSION_END_HOUR: int = SELL_SESSION_END_HOUR
+BUY_SESSION_WEEKDAYS: tuple[int, ...] = SELL_SESSION_WEEKDAYS
+
+# Sell + buy together (STRATEGY_MODE=ak_scenarios; trader decisions 2026-10-26)
+AK_SCENARIOS_NO_HEDGING: bool = True                    # Never a buy and a sell open together
+
 # Exact 1% Risk Sizing Config Constants (Section 6)
 RISK_PERCENT: float = 1.0
 RISK_BASIS: str = "balance"
@@ -109,7 +135,7 @@ class AppConfig:
     # Market Strategy
     symbol: str = "EURUSD"
     timeframe: str = "M5"
-    strategy_mode: str = "strict_compliance"  # "strict_compliance", "c1_wickswap", "institutional", or "sell_scenarios"
+    strategy_mode: str = "strict_compliance"  # "strict_compliance", "c1_wickswap", "institutional", "sell_scenarios", "buy_scenarios" or "ak_scenarios"
     enable_intrabar_sweep: bool = True  # Enable intrabar sweep detection during HTF formation
     rr_multiple: int = RR_MULTIPLE
     confirm_candles: int = CONFIRM_CANDLES

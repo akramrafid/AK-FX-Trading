@@ -37,6 +37,41 @@ def _same_symbol(a: str, b: str) -> bool:
     return bool(a.strip()) and norm(a) == norm(b)
 
 
+def _account_entries(acc: dict, symbol: str) -> List[dict]:
+    """symbol's quote entries in DWX_Account.txt: the chart quote when the chart shows it, then its pair."""
+    entries = [acc] if _same_symbol(str(acc.get("symbol", "")), symbol) else []
+    pairs = acc.get("pairs")
+    if isinstance(pairs, dict):
+        entries += [v for k, v in pairs.items() if isinstance(v, dict) and _same_symbol(k, symbol)]
+    return entries
+
+
+def account_spread_pips(acc: object, symbol: str) -> Optional[Decimal]:
+    """symbol's live spread in pips from the account snapshot the EA writes, or None."""
+    if not isinstance(acc, dict):
+        return None
+    for entry in _account_entries(acc, symbol):
+        try:
+            spread = Decimal(str(entry["spread_pips"]))
+        except (KeyError, ArithmeticError, ValueError, TypeError):
+            continue
+        if spread.is_finite() and spread >= 0:
+            return spread
+    return None
+
+
+def open_positions_by_side(acc: object, symbol: str) -> Optional[Tuple[int, int]]:
+    """(buys, sells) open on symbol from the EA's order list, or None when the snapshot has no order list."""
+    if not isinstance(acc, dict) or not isinstance(acc.get("orders"), list):
+        return None
+    types = [
+        str(o.get("type", "")).upper()
+        for o in acc["orders"]
+        if isinstance(o, dict) and _same_symbol(str(o.get("symbol", "")), symbol)
+    ]
+    return types.count("BUY"), types.count("SELL")
+
+
 class OrderType(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -255,11 +290,7 @@ class DWXClient:
         acc = self.read_account_info()
         if not isinstance(acc, dict):
             return None
-        candidates = [acc] if _same_symbol(str(acc.get("symbol", "")), symbol) else []
-        pairs = acc.get("pairs")
-        if isinstance(pairs, dict):
-            candidates += [v for k, v in pairs.items() if isinstance(v, dict) and _same_symbol(k, symbol)]
-        for quote in candidates:
+        for quote in _account_entries(acc, symbol):
             try:
                 bid = Decimal(str(quote.get("bid", 0)))
                 ask = Decimal(str(quote.get("ask", 0)))
