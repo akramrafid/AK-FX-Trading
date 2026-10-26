@@ -421,3 +421,10 @@
 **Notes:** python-reviewer found no CRITICAL issue and 1 HIGH, 4 MEDIUM. (1) HIGH, fixed: the guardrails failed open when the gate's read of DWX_Account.txt came back empty (the EA rewrites it every second); the read is now retried, and on the USDCAD path a missing balance, equity or spread sends nothing (ACCOUNT_SNAPSHOT_UNREADABLE). (2) Kept and documented in plan.md §3.4: daily loss = equity now − the day's starting balance, as in prop-firm daily-loss rules. (3) Fixed: the day start is kept per MT4 account (bridge/day_start.py), so an account switch starts that account's day. (4) Fixed: the no-hedging count is owned by the bridge: a fresh order list plus the orders it sent in the last 60 s that MT4 does not list yet; no counter or a stale file means neither side trades. (5) Noted: the 2.5-pip spread ceiling now applies in every strategy mode (it was never checked before). Left open (LOW, pre-existing or by design): bars queued after a stall still trade at the current price; with no fresh account quote the TP-from-fill path still falls back to DWX_Market_Data.txt, which the EA never writes; after a restart a setup can trade again within its window; .gitignore lacks *.db-wal and *.db-shm.
 **Status:** COMPLETED
 
+### 2026-10-26 10:29 — DECISION: Daily loss circuit breaker off on the demo account
+**Owner:** senior-integration-engineer
+**Changed:** plan.md (§3.4, §9.4, §9.5)
+**Verified:** `python -m orchestrator.cli lint` clean. No code change: `MAX_DAILY_LOSS_PCT=0` already means off in config.py; no ToDos.md task is affected.
+**Notes:** The trader runs STRATEGY_MODE=ak_scenarios on the demo account from the terminal (`python -m bridge.executor`) with no limit on open or daily trades, 1% risk per trade and no daily loss limit. Turning the breaker off relaxes the plan.md §3.4 hard rule, so it was confirmed with the trader first; it applies to the demo account only. With no daily stop, this mode's backtest fell 65.5% from its peak over 14 days (spread 0). `MAX_DAILY_LOSS_PCT=0.03` turns it back on. The trader applies the .env change. Not committed.
+**Status:** COMPLETED
+

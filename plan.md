@@ -34,7 +34,7 @@ A production-grade automated algorithmic Forex trading system executing a propri
    Hard sanity bounds (e.g. min 0.01 lot, max broker lot limit, absolute max lot clamp) must wrap this formula so sizing bugs can never multiply exposure. Hard-coded lot sizes are strictly forbidden.
 4. **Non-Bypassable Risk Guardrails Layer:** The risk engine sits between the rule engine and the order execution bridge.
    - Max risk per trade: fixed % (e.g., 1.0% or 0.5%) of current balance.
-   - Daily loss circuit breaker: if cumulative daily realized + unrealized loss hits threshold (e.g., 3-4%), trading is halted for the rest of the 24h trading day.
+   - Daily loss circuit breaker: if cumulative daily realized + unrealized loss hits threshold (e.g., 3-4%), trading is halted for the rest of the 24h trading day. The threshold is set by the operator (`MAX_DAILY_LOSS_PCT`; `0` = off, the trader's choice for the demo account on 2026-10-26).
    - Max concurrent open positions limit, set by the operator (`MAX_OPEN_TRADES`; `0` = no limit, the trader's choice on 2026-10-25). In `ak_scenarios` mode a buy and a sell are never open together (no hedging).
    - The daily loss and spread checks read the live account snapshot the EA writes; on the USDCAD exact-sizing path nothing is sent when it cannot be read. Daily loss = equity now − the balance at the day's first reading (closed + floating P&L, so floating P&L carried past 00:00 UTC counts toward the new day, as in prop-firm daily-loss rules). The day's start is kept per MT4 account in `daily_metrics`, so a restart keeps it; deposits and withdrawals count as P&L. Spread = the symbol's live spread. (Until 2026-10-26 the bridge passed constant zeros, so neither check could trip.)
    - This layer can NEVER be bypassed or relaxed by any rule engine update or future ML/RL model.
@@ -109,7 +109,7 @@ Aligned with the user specification:
    - *Decision:* Live TP is priced from the live bid when the order is sent and never modified afterwards.
    - *Decision:* The backtest is reported at 0 spread and at a 0.5 pip placeholder (no spread history is recorded), with net R after the $7/lot commission alongside.
    - *Decision:* Trades in the London, London–NY and NY sessions: 07:00–21:00 UTC, Monday–Friday, on B3's open time.
-   - *Decision:* No limit on open trades or daily trades (`MAX_OPEN_TRADES=0`, `MAX_DAILY_TRADES=0`). The daily loss circuit breaker stays.
+   - *Decision:* No limit on open trades or daily trades (`MAX_OPEN_TRADES=0`, `MAX_DAILY_TRADES=0`). The daily loss circuit breaker stays (turned off for the demo account on 2026-10-26, item 5).
    - *Decision:* Risk 1% of the account balance per trade; reward:risk 1:10.
    - *Decision:* A gap of more than 5 minutes in the 1m feed is an outage: no 1m sequence spans it and no fill is simulated across it.
 5. **1-Minute Buy Scenarios 1–2, and sell + buy together (2026-10-26):**
@@ -118,4 +118,5 @@ Aligned with the user specification:
    - *Decision:* Same session as the sells: 07:00–21:00 UTC, Monday–Friday, on the signal bar's open time.
    - *Decision:* When the run's 1st candle is a doji, eligibility is tested on that doji's own low (the doc's prose; the original Pine code is not in the repo).
    - *Decision:* A run whose 1st candle is not its lowest is journaled as FIRST_NOT_LOWEST only when it matches an armed setup.
-   - *Decision:* The daily loss circuit breaker and the spread ceiling read the live account (§3.4); `MAX_DAILY_LOSS_PCT=0.03` is the recommended `.env` value.
+   - *Decision:* The daily loss circuit breaker and the spread ceiling read the live account (§3.4).
+   - *Decision:* The trader turned the daily loss circuit breaker off for the demo account (`MAX_DAILY_LOSS_PCT=0`); `MAX_DAILY_LOSS_PCT=0.03` turns it back on.
